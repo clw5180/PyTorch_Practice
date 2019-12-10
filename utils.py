@@ -695,7 +695,8 @@ def show_images(imgs, num_rows, num_cols, scale=2):
             axes[i][j].imshow(imgs[i * num_cols + j])
             axes[i][j].axes.get_xaxis().set_visible(False)
             axes[i][j].axes.get_yaxis().set_visible(False)
-    return axes
+    plt.show() # clw modify
+    #return axes
 
 def train(train_iter, test_iter, net, loss, optimizer, device, num_epochs):
     net = net.to(device)
@@ -703,7 +704,8 @@ def train(train_iter, test_iter, net, loss, optimizer, device, num_epochs):
     batch_count = 0
     for epoch in range(num_epochs):
         train_l_sum, train_acc_sum, n, start = 0.0, 0.0, 0, time.time()
-        for X, y in train_iter:
+        for X, y in tqdm(train_iter):  # clw modify
+        #for X, y in train_iter:
             X = X.to(device)
             y = y.to(device)
             y_hat = net(X)
@@ -718,7 +720,8 @@ def train(train_iter, test_iter, net, loss, optimizer, device, num_epochs):
         test_acc = evaluate_accuracy(test_iter, net)
         print('epoch %d, loss %.4f, train acc %.3f, test acc %.3f, time %.1f sec'
               % (epoch + 1, train_l_sum / batch_count, train_acc_sum / n, test_acc, time.time() - start))
-
+        time.sleep(0.01)  # 因为tqdm和print的打印结果都会先存入缓冲区，为避免print后立刻进入下一轮tqdm，出现混乱影响结果显示
+        # https://www.jianshu.com/p/e9e3a098d72b
 
 
 
@@ -1142,3 +1145,10 @@ def predict_sentiment(net, vocab, sentence):
     sentence = torch.tensor([vocab.stoi[word] for word in sentence], device=device)
     label = torch.argmax(net(sentence.view((1, -1))), dim=1)
     return 'positive' if label.item() == 1 else 'negative'
+
+#### clw add
+def init_seeds(seed=0):
+    import torch_utils
+    random.seed(seed)
+    np.random.seed(seed)
+    torch_utils.init_seeds(seed=seed)
