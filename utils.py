@@ -792,6 +792,7 @@ def show_bboxes(axes, bboxes, labels=None, colors=None):
             axes.text(rect.xy[0], rect.xy[1], labels[i],
                       va='center', ha='center', fontsize=6, color=text_color,
                       bbox=dict(facecolor=color, lw=0))
+    plt.show()
 
 def compute_intersection(set_1, set_2):
     """
@@ -880,7 +881,7 @@ def MultiBoxTarget(anchor, label):
     https://zh.d2l.ai/chapter_computer-vision/anchor.html
     Args:
         anchor: torch tensor, 输入的锚框, 一般是通过MultiBoxPrior生成, shape:（1，锚框总数，4）
-        label: 真实标签, shape为(bn, 每张图片最多的真实锚框数, 5)
+        label: 真实标签, shape为(bn, gt总数, 5)
                第二维中，如果给定图片没有这么多锚框, 可以先用-1填充空白, 最后一维中的元素为[类别标签, 四个坐标值]
     Returns:
         列表, [bbox_offset, bbox_mask, cls_labels]
@@ -896,7 +897,7 @@ def MultiBoxTarget(anchor, label):
         MultiBoxTarget函数的辅助函数, 处理batch中的一个
         Args:
             anc: shape of (锚框总数, 4)
-            lab: shape of (真实锚框数, 5), 5代表[类别标签, 四个坐标值]
+            lab: shape of (gt总数, 5), 5代表[类别标签, 四个坐标值]
             eps: 一个极小值, 防止log0
         Returns:
             offset: (锚框总数*4, )
@@ -929,6 +930,8 @@ def MultiBoxTarget(anchor, label):
     batch_cls_labels = []
     for b in range(bn):
         offset, bbox_mask, cls_labels = MultiBoxTarget_one(anchor[0, :, :], label[b, :, :])
+        # clw note：bn应该是batch的nums，对于多个batch的情况，
+        #           尽管每个batch也就是每张图的label不同，但是anchor都是相同的；
         
         batch_offset.append(offset)
         batch_mask.append(bbox_mask)

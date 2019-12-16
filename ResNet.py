@@ -75,7 +75,7 @@ class ResNet(nn.Module):  # 11 million parameters
 if __name__ == "__main__":
     net = ResNet()
     print(net)
-    torch_utils.model_info(net, report='summary')  # 'full' or 'summary'
+    torch_utils.model_info(net, report='full')  # 'full' or 'summary'
 
     # 查看每个层输出的shape
     # X = torch.rand((1, 1, 224, 224))
