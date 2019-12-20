@@ -11,12 +11,12 @@ class Yolo_head(nn.Module):
         super().__init__()
 
         self.cls_num = cls_num
-        self.anchor = anchors
+        self.anchors = anchors
         self.stride = stride
 
     def forward(self, prediction):
-        predict_transform(prediction, num_classes=self.cls_num, anchors=self.anchor, stride=self.stride)     
-
+        yolo_head_out = predict_transform(prediction, num_classes=self.cls_num, anchors=self.anchors, stride=self.stride)     
+        return yolo_head_out
 
 
 

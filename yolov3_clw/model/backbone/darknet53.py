@@ -5,16 +5,16 @@ class Darknet53(nn.Module):
     def __init__(self):
         super(Darknet53, self).__init__()  # super(FooChild,self) 首先找到 FooChild 的父类（就是类 FooParent），
                                            # 然后把类 FooChild 的对象转换为类 FooParent 的对象; python3可以直接super()...
-        self.conv0 = Convolutional(3, 32, 3, 1)
-        self.conv0_s2 = Convolutional(32, 64, 3, 1, stride=2)
-        self.darknet_block1 = self.darknet_block(64, 32, 64, 1)
-        self.conv1_s2 = Convolutional(64, 128, 3, 1, stride=2)
+        self.conv0 = Convolutional(3, 32, 3, stride=1, padding=1)
+        self.conv0_s2 = Convolutional(32, 64, 3, stride=2, padding=1)
+        self.darknet_block1 = self.darknet_block(64, 32, 64, padding=1)
+        self.conv1_s2 = Convolutional(64, 128, 3, stride=2, padding=1)
         self.darknet_block2 = self.darknet_block(128, 64, 128, 2)
-        self.conv2_s2 = Convolutional(128, 256, 3, 1, stride=2)
+        self.conv2_s2 = Convolutional(128, 256, 3, stride=2, padding=1)
         self.darknet_block3 = self.darknet_block(256, 128, 256, 8)
-        self.conv3_s2 = Convolutional(256, 512, 3, 1, stride=2)
+        self.conv3_s2 = Convolutional(256, 512, 3, stride=2, padding=1)
         self.darknet_block4 = self.darknet_block(512, 256, 512, 8)
-        self.conv4_s2 = Convolutional(512, 1024, 3, 1, stride=2)
+        self.conv4_s2 = Convolutional(512, 1024, 3, stride=2, padding=1)
         self.darknet_block5 = self.darknet_block(1024, 512, 1024, 4)
 
     def forward(self, X):

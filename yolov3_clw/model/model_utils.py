@@ -5,7 +5,7 @@ from torch import nn
 
 ## 1、general module of layers
 class Convolutional(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, padding, stride=1):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
         super().__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
         self.bn = nn.BatchNorm2d(out_channels)  # clw note: TODO
@@ -21,8 +21,8 @@ class Convolutional(nn.Module):
 class Residual_block(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels):
         super().__init__()
-        self.conv_block1 = Convolutional(in_channels, mid_channels, kernel_size=1, padding=0)
-        self.conv_block2 = Convolutional(mid_channels, out_channels, kernel_size=3, padding=1)
+        self.conv_block1 = Convolutional(in_channels, mid_channels, kernel_size=1, stride=1, padding=0)
+        self.conv_block2 = Convolutional(mid_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
     def forward(self, X):
         A1 = self.conv_block1(X)
@@ -101,6 +101,7 @@ def predict_transform(prediction, num_classes, anchors, stride, CUDA=True):
     if CUDA:
         x_offset = x_offset.cuda()
         y_offset = y_offset.cuda()
+        prediction = prediction.cuda() # 参考https://zhuanlan.zhihu.com/p/36984201下方回复
 
     x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1, num_anchors).view(-1, 2).unsqueeze(0)
     # cat后变成(52*52, 2)，repeat后变成(52*52*1, 2*3)，view后变成(52*52*1*3 ,2),unsqueeze后变成(1, 52*52*3, 2)
