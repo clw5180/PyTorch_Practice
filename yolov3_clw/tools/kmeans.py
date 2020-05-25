@@ -1,8 +1,53 @@
-#coding:utf-8
+# coding:utf-8
+# 功能：对 xml格式的数据集（训练集）进行聚类，找到合适的 anchor
+# 输入：img_path
+# 输出：save_path (no need to modify, default: 'train_info.txt')
 
+import os
+import xml.etree.ElementTree as ET
 import sys
 import numpy as np
-from collections import Counter
+from tqdm import tqdm
+import argparse
+
+
+# fliter_classes = ["car", "bus"]
+
+def convert_annotation(xml_path):
+    in_file = open(xml_path, encoding='utf-8')
+    tree=ET.parse(in_file)
+    root = tree.getroot()
+
+    annotations = ""
+    for obj in root.iter('object'):
+        cls = obj.find('name').text
+        cls = cls.replace(' ', '_')  # 注意这一句非常关键,因为后面会按照空格提取txt内容,如果class name带空格,那么就会有bug
+
+        ### 只对部分类别进行聚类
+        # if cls not in fliter_classes:
+        #     continue
+
+        ### 如果前面已经决定 difficult obj 不参与训练，那么聚类的时候也应该过滤掉
+        # difficult = obj.find('difficult').text
+        # if int(difficult)==1:  # clw note:
+        #    continue
+
+        xmlbox = obj.find('bndbox')
+        b = (float(xmlbox.find('xmin').text), float(xmlbox.find('ymin').text), float(xmlbox.find('xmax').text), float(xmlbox.find('ymax').text))
+        annotations += " " + ",".join([str(a) for a in b]) + ',' + str(cls)
+    return annotations
+
+def scan_annotations(img_path, save_path = "train_info.txt"):
+    image_names = [i for i in  os.listdir(img_path) if i.endswith(".png") or i.endswith(".jpg") ]
+    list_file = open(save_path, 'w')
+    pbar = tqdm(image_names)
+    for image_name in pbar:
+        pbar.set_description("Processing %s" % image_name)
+        xml_path = os.path.join(img_path, image_name[:-4] + '.xml')  # 暂时认为 img 和 xml 在同一文件夹
+        content = os.path.join(img_path, image_name) + convert_annotation(xml_path) + '\n'
+        list_file.write(content)
+    list_file.close()
+    pass
 
 
 box_width_min = 999999
@@ -88,17 +133,17 @@ class YOLO_Kmeans:
             # 对应length=3
             length = len(infos)
             for i in range(1, length):  # clw note：这里要从1开始，因为0是图片路径字符串
-                xmax = int(infos[i].split(',')[2])
-                xmin = int(infos[i].split(',')[0])
+                xmax = float(infos[i].split(',')[2])
+                xmin = float(infos[i].split(',')[0])
                 width = xmax - xmin
-                height = int(infos[i].split(',')[3]) - int(infos[i].split(',')[1])
+                height = float(infos[i].split(',')[3]) - float(infos[i].split(',')[1])
                 dataSet.append([width, height])
 
                 # --------------------------------------------------------------------------
                 # clw add: 统计所有box宽和高的最大最小值
                 global box_width_min
                 global box_height_min
-                global  box_width_max
+                global box_width_max
                 global box_height_max
 
                 if width < box_width_min:
@@ -112,8 +157,8 @@ class YOLO_Kmeans:
 
                 box_width_list.append(width)
                 box_height_list.append(height)
-                box_scale_list.append(round(width/height, 2))
-                #--------------------------------------------------------------------------
+                box_scale_list.append(round(width / height, 2))
+                # --------------------------------------------------------------------------
 
         result = np.array(dataSet)
         f.close()
@@ -131,29 +176,37 @@ class YOLO_Kmeans:
         for i in range(1, nAnchor):
             anchor = result_ratio[i]
             format_anchors += ",  " + str(anchor[0]) + "," + str(anchor[1])
-            
-        print("\nK anchors: {}".format(format_anchors))
-        print("Accuracy: {:.2f}%".format( self.avg_iou(all_boxes, result) * 100))
-        pass
+
+        # print("\nK anchors: {}".format(format_anchors))
+        # print("Accuracy: {:.2f}%".format( self.avg_iou(all_boxes, result) * 100))  # clw note
+        # pass
+        return format_anchors, self.avg_iou(all_boxes, result) * 100  # clw modify
+
 
 def kmeans_anchors(filename, cluster_number):
-    ## 多次聚类
-    for i in range(0, 10): #clw modify:多次聚类找到最佳结果
-       kmeans = YOLO_Kmeans(cluster_number, filename)
-       kmeans.txt2clusters()
-    pass
+    kmeans = YOLO_Kmeans(cluster_number, filename)
+    anchors_max, acc_max = kmeans.txt2clusters()
+    print('Multiple times kmeans and get best acc:')
+    for i in tqdm(range(0, 10)):    # clw modify:多次聚类，比如聚类10次，输出最大的acc和对应的anchor
+        kmeans = YOLO_Kmeans(cluster_number, filename)
+        anchors, acc = kmeans.txt2clusters()
+        if acc > acc_max:
+            acc_max = acc
+            anchors_max = anchors
+    print("K anchors: {}".format(anchors_max))
+    print("Accuracy: {:.2f}%".format(acc_max))  # clw note
 
 
 if __name__ == "__main__":
-    # 里面是一系列图片文件路径和标注信息,可以用voc2kemansTxt.py生成
-    filename = "train.txt"
-    cluster_number = 9  # anchor的个数,默认9
 
-    if len(sys.argv) > 1:
-        filename = sys.argv[1]
+    img_path = '/mfs/home/caoliwei/dataset/voc2007/val'  # 暂时认为 img 和 xml 在同一文件夹
+    if not os.path.exists(img_path):
+        print("not exists '%s'" %(img_path))
+        sys.exit(0)
 
-    if len(sys.argv) > 2:        
-        cluster_number = eval(sys.argv[2])
-
-    kmeans_anchors(filename, cluster_number)
+    save_path = 'train_info.txt'
+    
+    scan_annotations(img_path, save_path)  # 扫描所有xml，将训练集图片和对应box信息写入txt中
+    kmeans_anchors(save_path, 9)           # 读取上面的txt，得到所有bbox，然后做聚类
     pass
+
