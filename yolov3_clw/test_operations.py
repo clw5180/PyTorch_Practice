@@ -1,3 +1,12 @@
+### 测试 datasets.py
+# from utils.datasets import VocDataset
+# dataset = VocDataset('D:/valid.txt', img_size=416, is_training=False)
+# data = dataset[2]
+# print('success !')
+
+
+
+
 import numpy as np
 import torch
 
@@ -26,4 +35,6 @@ import torch
 # y_offset = torch.FloatTensor(b).view(-1, 1)
 # print('x_offset=',x_offset)
 # print('y_offset=',y_offset)
+
+
 

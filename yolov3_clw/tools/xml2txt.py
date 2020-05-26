@@ -1,52 +1,8 @@
 # -*- coding=utf-8 -*-
-"""
-该代码库使用yolo3的官方数据:
-+labels
-    +train2014
-        -pic1.txt
-        ...
-    +val2014
-        -pic2.txt
-        ...
-    -trainvalno5k.txt
-    -5k.txt
-
-每个label文件 pic1.txt:　多行,1行1个obj,如:56 0.855422 0.633625 0.087594 0.208542　　　小数,且为xywh格式
-
-
-trainvalno5k.txt和5k.txt里每行是1个pic图片的绝对路径,如 /home/xy/test/test/test/images/val2014/COCO_val2014_000000581899.jpg
-images与上面的labels同级.
-
-故 coco如下:
-+coco
-    +annotations
-    +images
-        +train2014
-        +val2014
-    +labels
-        +train2014
-        +val2014
-        -trainvalno5k.txt
-        -5k.txt
-
-该脚本将自己的数据集转换成如上形式. 
-有data, 内含所有图片和xml.
-
-+data
-    -jpgs
-    -xmls
-->
-
-+data
-    +images
-        -jpgs
-        -xmls
-    +labels
-        -label1.txt
-        ...
-    -train.txt
-    [-test.txt]
-"""
+# 功能：(1)在xml_filepath对应路径下生成同名.txt文件，如 00001.txt 记录的坐标是归一化之后的
+#       (2)记录所有图片的路径到 train.txt 或 valid.txt 文件中
+# 输入：train_path， valid_path，test_path
+#       train_save_path 默认为 '../train.txt'
 
 import xml.etree.ElementTree as ET
 import os
@@ -139,29 +95,55 @@ def xml2txt(image_path,output_txt_file_path, class2indice, append = False ,fix_J
 def cloth_train_data(train_path=None, valid_path = None, test_path=None):
 
     class2indice = {
-        "car"    :0,
-        "person" :1
+        "aeroplane": 0,
+        "bicycle": 1,
+        "bird": 2,
+        "boat": 3,
+        "bottle": 4,
+        "bus": 5,
+        "car": 6,
+        "cat": 7,
+        "chair": 8,
+        "cow": 9,
+        "diningtable": 10,
+        "dog": 11,
+        "horse": 12,
+        "motorbike": 13,
+        "person": 14,
+        "pottedplant": 15,
+        "sheep": 16,
+        "sofa": 17,
+        "train": 18,
+        "tvmonitor": 19
     }
 
     if train_path is not None and os.path.exists(train_path):
-        xml2txt(train_path, './train.txt',  class2indice)
+        xml2txt(train_path, train_save_path,  class2indice)
     else:
         print("not exists '%s'" %(train_path))
 
     if valid_path is not None and os.path.exists(valid_path):
-        xml2txt(valid_path, './valid.txt',  class2indice)
-        xml2txt(test_path, './test.txt',  class2indice)
+        xml2txt(valid_path, valid_save_path,  class2indice)
     else:
         print("not exists '%s' or '%s'" %(valid_path, test_path))
 
+    if test_path is not None and os.path.exists(valid_path):
+        xml2txt(test_path, test_save_path, class2indice)
+    else:
+        print("not exists '%s' or '%s'" % (valid_path, test_path))
+
     print('done')
-    pass
+
 
 if __name__ == "__main__":
 
-    train_path = '/home/caoliwei/train/'
-    valid_path = '/home/caoliwei/val/'
-    test_path = '/home/caoliwei/test/'
+    train_path = 'D:/dataset/train'
+    valid_path = 'D:/dataset/val'
+    test_path = None
+
+    train_save_path = '../train.txt'
+    valid_save_path = '../valid.txt'
+    test_save_path = '../test.txt'
 
     if len(sys.argv) > 1:
         train_path = sys.argv[1]
