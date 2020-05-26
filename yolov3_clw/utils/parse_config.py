@@ -42,3 +42,22 @@ def parse_model_cfg(path):
     u = [x for x in f if x not in supported]  # unsupported fields
     assert not any(u), "Unsupported fields %s in %s. See https://github.com/ultralytics/yolov3/issues/631" % (u, path)
     return mdefs
+
+
+def parse_data_cfg(path):
+    # Parses the data configuration file
+    if not os.path.exists(path) and os.path.exists('data' + os.sep + path):  # add data/ prefix if omitted
+        path = 'data' + os.sep + path
+
+    with open(path, 'r') as f:
+        lines = f.readlines()
+    options = dict()
+
+    for line in lines:
+        line = line.strip()
+        if line == '' or line.startswith('#'):
+            continue
+        key, val = line.split('=')
+        options[key.strip()] = val.strip()
+
+    return options
