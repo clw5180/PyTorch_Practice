@@ -24,10 +24,10 @@ def parse_xml(xml_path):
     for ix, obj in enumerate(objs):
         name = obj.find('name').text
         box = obj.find('bndbox')
-        x_min = int(box[0].text)
-        y_min = int(box[1].text)
-        x_max = int(box[2].text)
-        y_max = int(box[3].text)
+        x_min = int(box.find('xmin').text)
+        y_min = int(box.find('ymin').text)
+        x_max = int(box.find('xmax').text)
+        y_max = int(box.find('ymax').text)
         coords.append([x_min, y_min, x_max, y_max, name])
     return filename, (width, height), coords
 
@@ -37,11 +37,13 @@ def write_single_label(xml_filepath, class2indice):
     _, (width, height), coords = parse_xml(xml_filepath)
 
     #"56 0.855422 0.633625 0.087594 0.208542"    
-    label = xml_filepath[:-3] + "txt"
+    label = xml_filepath[:-4] + ".txt"
     f = open(label, 'w')
     for i,coor in enumerate(coords):
         try:
             xmin, ymin, xmax, ymax, c = coor
+            # 有必要的话，应该做异常数据检测然后修正，如超出范围的box截取到边缘  TODO
+
             x = (xmin + xmax) / 2 / width
             y = (ymin + ymax) / 2 / height
             w = (xmax - xmin) / width

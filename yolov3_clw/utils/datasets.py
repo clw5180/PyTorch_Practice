@@ -52,33 +52,31 @@ class VocDataset(Dataset):  # for training/testing
             label_path = self.label_file_paths[index]
             with open(label_path, 'r') as f:
                 x = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
-                if x.size > 0:
-                    label = x.copy()
+                nL = len(x)
+                if nL:
+                    labels = torch.zeros((nL, 6))  # add one column to save batch_idx
+                                                   # now labels: [ batch_idx, class_idx, x, y, w, h ]
+                    labels[:, 1:] = torch.from_numpy(x) # batch_idx is at the first colume, index 0
 
         # opencv 读取
         img = cv2.imread(img_path)
         if img is None:
             raise Exception('Read image error: %s not exist !' % img_path)
         orig_h, orig_w = img.shape[:2]
+        img0 = img.copy()                  # 拷贝一份作为原始副本，便于返回，因为接下来transforms连续操作会改变img
 
         # PIL 读取
         # img = Image.open(img_path)  # 注意是 img_pil格式
         # orig_w, orig_h = img_pil.size
-        img0 = img.copy()                  # 拷贝一份作为原始副本，便于返回，因为接下来transforms连续操作会改变img
+
+
         if self.is_training:
-            img_tensor = self.transforms(img, label)  # 对 img 和 label 都要做相应的变换
+            img_tensor, label_tensor = self.transforms(img, labels)  # 对 img 和 label 都要做相应的变换
         else:
             img_tensor = self.transforms(img)  # ToTensor 已经转化为 3x416x416 并且完成归一化
 
         # 2、根据 index 读取相应标签
         if self.is_training:  # 训练
-            label_path = self.label_file_paths[index]
-            label = np.loadtxt(label_path)  # no need to .reshape(-1, 5)
-            nL = len(self.label_file_paths)
-            if nL:
-                label_tensor = torch.zeros((nL, 6))  # clw note: maybe leave index 0 for batch_size dim
-                label_tensor[:, 1:] = torch.from_numpy(label)
-
             return img_tensor, label_tensor, img_path, (orig_h, orig_w)
         else:     # 测试
             return img_tensor, img0, img_name
@@ -88,7 +86,8 @@ class VocDataset(Dataset):  # for training/testing
         img, label, path, shapes = list(zip(*batch))  # transposed
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(img, 0), torch.cat(label, 0), path, shapes  # TODO：如 batch=4，需要对img和label进行堆叠
+        return torch.stack(img, 0), torch.cat(label, 0), path, shapes  # TODO：如 batch=4，需要对img进行堆叠
+        # img 堆叠后变成[bs, 3, 416, 416] 多了bs一个维度,   label原本是[5, 5]  [1, 5]，concat后变成 [n, 5]
 
     @staticmethod
     def test_collate_fn(batch):

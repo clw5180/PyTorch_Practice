@@ -5,6 +5,166 @@ import torchvision
 import numpy as np
 import cv2
 import random
+import torch.nn as nn
+####################
+
+def compute_loss(p, targets, model, giou_flag=True):  # predictions, targets, model
+    ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
+    lcls, lbox, lobj = ft([0]), ft([0]), ft([0])
+    tcls, tbox, indices, anchor_vec = build_targets(model, targets)
+    #h = model.hyp  # hyperparameters
+
+    red = 'sum'  # Loss reduction (sum or mean)
+
+    # Define criteria
+    BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([1]), reduction=red)
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([1]), reduction=red)
+    BCE = nn.BCEWithLogitsLoss(reduction=red)
+    CE = nn.CrossEntropyLoss(reduction=red)  # weight=model.class_weights
+
+    # Compute losses
+    np, ng = 0, 0  # number grid points, targets
+    for i, pi in enumerate(p):  # layer index, layer predictions
+        b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
+        tobj = torch.zeros_like(pi[..., 0])  # target obj
+        np += tobj.numel()
+
+        # Compute losses
+        nb = len(b)
+        if nb:  # number of targets
+            ng += nb
+            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
+            # ps[:, 2:4] = torch.sigmoid(ps[:, 2:4])  # wh power loss (uncomment)
+			#########
+            # GIoU
+            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
+            pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]
+            pbox = torch.cat((pxy, pwh), 1)  # predicted box
+            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            lbox += (1.0 - giou).sum() if red == 'sum' else (1.0 - giou).mean()  # giou loss
+            tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+            #######
+            '''  # old version
+            # GIoU
+			tobj[b, a, gj, gi] = 1.0  # obj
+            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
+            #pbox = torch.cat((pxy, torch.exp(ps[:, 2:4]).clamp(max=1E4) * anchor_vec[i]), 1)  # predicted box
+            pbox = torch.cat((pxy, torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]), 1)  # predicted box
+            # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            # lbox += (1.0 - giou).mean()  # giou loss
+            giou = 1.0 - bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            lbox += giou.sum() if red == 'sum' else giou.mean()  # giou loss
+			'''
+
+            if model.nc > 1:  # cls loss (only if multiple classes)
+                t = torch.zeros_like(ps[:, 5:])  # targets
+                t[range(nb), tcls[i]] = 1.0
+                lcls += BCEcls(ps[:, 5:], t)  # BCE
+                # lcls += CE(ps[:, 5:], tcls[i])  # CE
+
+                # Instance-class weighting (use with reduction='none')
+                # nt = t.sum(0) + 1  # number of targets per class
+                # lcls += (BCEcls(ps[:, 5:], t) / nt).mean() * nt.mean()  # v1
+                # lcls += (BCEcls(ps[:, 5:], t) / nt[tcls[i]].view(-1,1)).mean() * nt.mean()  # v2
+
+            # Append targets to text file
+            # with open('targets.txt', 'a') as file:
+            #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
+
+
+        lobj += BCEobj(pi[..., 4], tobj)  # obj loss
+
+    lbox *= 3.54 # h['giou']
+    lobj *= 64.3 # h['obj']
+    lcls *= 37.4  # h['cls']
+    if red == 'sum':
+        bs = tobj.shape[0]  # batch size
+        lobj *= 3 / (6300 * bs) * 2  # 3 / np * 2
+        if ng:
+            lcls *= 3 / ng / model.nc
+            lbox *= 3 / ng
+        # old version
+	    #lbox *= 3 / ng
+        #lobj *= 3 / np
+        #lcls *= 3 / ng / model.nc
+
+    loss = lbox + lobj + lcls
+    return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
+
+
+def build_targets(model, targets):
+    # targets = [image, class, x, y, w, h]
+
+    nt = len(targets)
+    tcls, tbox, indices, av = [], [], [], []
+    multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+    reject, use_all_anchors = True, True
+    for i in model.yolo_layers:
+        # get number of grid points and anchor vec for this yolo layer
+        if multi_gpu:
+            ng, anchor_vec = model.module.module_list[i].ng, model.module.module_list[i].anchor_vec
+        else:
+            ng, anchor_vec = model.module_list[i].ng, model.module_list[i].anchor_vec
+
+        # iou of targets-anchors
+        t, a = targets, []
+        gwh = t[:, 4:6] * ng
+        if nt:
+            iou = torch.stack([wh_iou(x, gwh) for x in anchor_vec], 0)
+
+
+            if use_all_anchors:
+                na = len(anchor_vec)  # number of anchors
+                a = torch.arange(na).view((-1, 1)).repeat([1, nt]).view(-1)
+                t = targets.repeat([na, 1])
+                gwh = gwh.repeat([na, 1])
+                iou = iou.view(-1)  # use all ious
+            else:  # use best anchor only
+                iou, a = iou.max(0)  # best iou and anchor
+
+            # reject anchors below iou_thres (OPTIONAL, increases P, lowers R)
+            if reject:
+                j = iou.view(-1) > 0.2  # model.hyp['iou_t']  # iou threshold hyperparameter
+                #j = iou > model.hyp['iou_t']  # iou threshold hyperparameter
+                t, a, gwh = t[j], a[j], gwh[j]
+
+        # Indices
+        b, c = t[:, :2].long().t()  # target image, class
+        gxy = t[:, 2:4] * ng  # grid x, y
+        gi, gj = gxy.long().t()  # grid x, y indices
+        indices.append((b, a, gj, gi))
+
+        # GIoU
+        gxy -= gxy.floor()  # xy
+        tbox.append(torch.cat((gxy, gwh), 1))  # xywh (grids)
+        av.append(anchor_vec[a])  # anchor vec
+
+        # Class
+        tcls.append(c)
+        if c.shape[0]:  # if any targets
+            assert c.max() < model.nc, 'Target class_idx exceed total model classes'
+
+    return tcls, tbox, indices, av
+
+
+def wh_iou(box1, box2):
+    # Returns the IoU of wh1 to wh2. wh1 is 2, wh2 is nx2
+    box2 = box2.t()
+
+    # w, h = box1
+    w1, h1 = box1[0], box1[1]
+    w2, h2 = box2[0], box2[1]
+
+    # Intersection area
+    inter_area = torch.min(w1, w2) * torch.min(h1, h2)
+
+    # Union Area
+    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
+
+    return inter_area / union_area  # iou
+
+######################################################################
+
 
 
 def select_device(device):  # 暂时不支持 CPU

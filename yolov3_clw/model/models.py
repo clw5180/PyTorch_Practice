@@ -77,6 +77,7 @@ def create_modules(module_defs, img_size):
     output_filters = [int(hyperparams['channels'])]
     module_list = nn.ModuleList()
     routs = []  # list of layers which rout to deeper layes
+    yolo_index = -1
 
     for i, mdef in enumerate(module_defs):
         modules = nn.Sequential()
@@ -135,12 +136,12 @@ def create_modules(module_defs, img_size):
             pass
 
         elif mdef['type'] == 'yolo':
-            #yolo_index += 1
+            yolo_index += 1
             mask = [int(x) for x in mdef['mask'].split(',')]  # anchor mask
             modules = YOLOLayer(anchors=mdef['anchors'][mask],  # anchor list
-                                nc=int(mdef['classes'])  # number of classes
-                                #img_size=img_size,  # (416, 416)
-                                #yolo_index=yolo_index  # 0, 1 or 2
+                                nc=int(mdef['classes']),  # number of classes
+                                img_size=img_size,  # (416, 416)   TODO?
+                                yolo_index=yolo_index  # 0, 1 or 2
                                 )  # yolo architecture
 
             # Initialize preceding Conv2d() bias (https://arxiv.org/pdf/1708.02002.pdf section 3.3)
@@ -179,7 +180,7 @@ def create_modules(module_defs, img_size):
 
 
 class YOLOLayer(nn.Module):
-    def __init__(self, anchors, nc):
+    def __init__(self, anchors, nc, img_size, yolo_index):
         super(YOLOLayer, self).__init__()
 
         self.anchors = torch.Tensor(anchors)
@@ -223,8 +224,8 @@ class YOLOLayer(nn.Module):
 
 
 def get_yolo_layers(model):
-    return [i for i, x in enumerate(model.module_defs) if x['type'] == 'yolo']  # [82, 94, 106] for yolov3
-
+    #return [i for i, x in enumerate(model.module_defs) if x['type'] == 'yolo']  # [82, 94, 106] for yolov3
+    return [i-1 for i, x in enumerate(model.module_defs) if x['type'] == 'yolo'] # TODO: 因为cfg多了个[net]，所以相当于平白无故多加了一层
 
 def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float32):
     nx, ny = ng  # x and y grid size

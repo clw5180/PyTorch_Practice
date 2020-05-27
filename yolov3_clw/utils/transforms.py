@@ -10,12 +10,12 @@ from imgaug import augmenters as iaa
 def build_transforms(img_size, is_train=False):
     if is_train:
         transform = Compose([
-            ResizeImage(img_size),  # clw modify
+            Resize(img_size),  # clw modify
             ToTensor()              # clw modify
         ])
     else:
         transform = Compose([
-            ResizeImage(img_size),
+            Resize(img_size),
             ToTensor()
             # TODO: 归一化，但是使用预训练模型应该不能加
         ])
@@ -64,11 +64,12 @@ class ToTensor(object):
             image = np.transpose(image, (2, 0, 1))
             image = image.astype(np.float32)
 
-            return (torch.from_numpy(image),  torch.from_numpy(label))
+            #return (torch.from_numpy(image),  torch.from_numpy(label))
+            return (torch.from_numpy(image), label)
 
 
 
-class ResizeImage(object):
+class Resize(object):
     def __init__(self, new_size, interpolation=cv2.INTER_LINEAR):
         if isinstance(new_size, int):
             self.new_size = (new_size, new_size)  # 规定为 h，w
@@ -81,13 +82,14 @@ class ResizeImage(object):
 
         else:
             img, label = data[0], data[1]
-            orig_h, orig_w = img.shape[:2]
-            ratio_h = self.new_size[0] / orig_h
-            ratio_w = self.new_size[1] / orig_w  # 原图的框 -> resize后的图的框 ，即 orig -> new 比如从500 reize到416，ratio=0.832
-            label[:, 1] *= ratio_w  # x
-            label[:, 2] *= ratio_h  # y
-            label[:, 3] *= ratio_w  # w
-            label[:, 4] *= ratio_h  # h
+            #orig_h, orig_w = img.shape[:2]
+            #ratio_h = self.new_size[0] / orig_h
+            #ratio_w = self.new_size[1] / orig_w  # 原图的框 -> resize后的图的框 ，即 orig -> new 比如从500 reize到416，ratio=0.832
+            #label[:, 2] *= ratio_w   # clw note：  x_ctr，比如0.2，那么 img从 512->1024, 这个box的 x_ctr 的相对坐标还是 0.2，因此不用乘以 ratio
+            #label[:, 3] *= ratio_h   #
+            #label[:, 4] *= ratio_w   # clw note:  w，同样也是相对于整张图的大小，因此resize后的相对坐标也不需要任何变换；
+            #label[:, 5] *= ratio_h   #               因此这里的 x_ctr, y_ctr, w, h都是不需要任何处理的......
 
             img = cv2.resize(img, self.new_size, interpolation=self.interpolation)
             return (img, label)
+

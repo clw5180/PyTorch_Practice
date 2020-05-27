@@ -1,0 +1,9 @@
+D:\dataset\train\000005.jpg
+D:\dataset\train\000007.jpg
+D:\dataset\train\000009.jpg
+D:\dataset\train\000012.jpg
+D:\dataset\train\000016.jpg
+D:\dataset\train\000017.jpg
+D:\dataset\train\000019.jpg
+D:\dataset\train\000020.jpg
+D:\dataset\train\000021.jpg
