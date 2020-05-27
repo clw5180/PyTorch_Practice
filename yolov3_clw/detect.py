@@ -18,6 +18,7 @@ def detect():
     weights = opt.weights
     src_txt_path = opt.src_txt_path
     img_size = opt.img_size
+    batch_size = opt.batch_size
     dst_path = opt.dst_path
     if not os.path.exists(dst_path):
         os.mkdir(dst_path)
@@ -32,7 +33,11 @@ def detect():
 
     # 2、加载数据集
     test_dataset = VocDataset(src_txt_path, img_size, is_training=False)
-    dataloader = DataLoader(test_dataset, shuffle=False, batch_size=2, num_workers=0, collate_fn=test_dataset.test_collate_fn)
+    dataloader = DataLoader(test_dataset,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=0,    # TODO
+                            collate_fn=test_dataset.test_collate_fn)   # TODO
 
     # 3、预测，前向传播
     start = time.time()
@@ -40,7 +45,7 @@ def detect():
     for i, (img_tensor, img0, img_name) in enumerate(pbar):
         pbar.set_description("Already Processed %d image: " % (i+1))
         # print('clw: Already Processed %d image' % (i+1))
-        img_tensor = img_tensor.to(device)
+        img_tensor = img_tensor.to(device)   # (bs, 3, 416, 416)
         pred = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
 
         # NMS
@@ -50,7 +55,7 @@ def detect():
                 #or box in det:
                 for *box, conf, _, cls in det: # det: tensor.Size (bs, 7)    box: list
                     orig_h, orig_w = img0[batch_idx].shape[:2]  # 坐标变换
-                    new_h = new_w = img_tensor.size()[2]  # 绘图，new -> orig
+                    new_h = new_w = img_tensor.size()[2]  # 绘图，resize后的图的框 -> 原图的框，new -> orig
                     ratio_h = orig_h / new_h
                     ratio_w = orig_w / new_w
                     x1 = int(ratio_w * box[0])
@@ -58,6 +63,8 @@ def detect():
                     x2 = int(ratio_w * (box[2]))
                     y2 = int(ratio_h * (box[3]))
                     label = '%s %.2f' % (classes[int(cls)], conf)
+
+                    # 预测结果可视化
                     plot_one_box([x1, y1, x2, y2], img0[batch_idx], label=label, color=(255, 0, 0))
                     #cv2.rectangle(img0[batch_idx], (x1, y1), (x2, y2), (0, 0, 255), 1)  # 如果报错 TypeError: an integer is required (got type tuple)，检查是不是传入了img_tensor
 
@@ -80,6 +87,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression, do not be confused with the iou threshold for mAP')
+    parser.add_argument('--batch-size', type=int, default=4)
     opt = parser.parse_args()
     print(opt)
 

@@ -8,7 +8,7 @@ from PIL import Image
 
 '''
 读取自己数据的基本流程：
-1：制作存储了图像的路径和标签信息的txt
+1：制作存储了图像的路径和标签信息的txt9
 2：将这些信息转化为list，该list每一个元素对应一个样本
 3：通过getitem函数，读取数据标签，并返回。
 
@@ -45,9 +45,15 @@ class VocDataset(Dataset):  # for training/testing
 
     def __getitem__(self, index):  # 需要得到 img，labels，img_path，orig_size
 
-        # 1、根据 index 读取相应图片，保存图片信息
+        # 1、根据 index 读取相应图片，保存图片信息；如果是训练还需要读入label
         img_path = self.img_file_paths[index]
         img_name = img_path.split('/')[-1]
+        if self.is_training:
+            label_path = self.label_file_paths[index]
+            with open(label_path, 'r') as f:
+                x = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+                if x.size > 0:
+                    label = x.copy()
 
         # opencv 读取
         img = cv2.imread(img_path)
@@ -59,10 +65,13 @@ class VocDataset(Dataset):  # for training/testing
         # img = Image.open(img_path)  # 注意是 img_pil格式
         # orig_w, orig_h = img_pil.size
         img0 = img.copy()                  # 拷贝一份作为原始副本，便于返回，因为接下来transforms连续操作会改变img
-        img_tensor = self.transforms(img)  # ToTensor 已经转化为 3x416x416 并且完成归一化
+        if self.is_training:
+            img_tensor = self.transforms(img, label)  # 对 img 和 label 都要做相应的变换
+        else:
+            img_tensor = self.transforms(img)  # ToTensor 已经转化为 3x416x416 并且完成归一化
 
         # 2、根据 index 读取相应标签
-        if self.is_training:
+        if self.is_training:  # 训练
             label_path = self.label_file_paths[index]
             label = np.loadtxt(label_path)  # no need to .reshape(-1, 5)
             nL = len(self.label_file_paths)
@@ -71,15 +80,15 @@ class VocDataset(Dataset):  # for training/testing
                 label_tensor[:, 1:] = torch.from_numpy(label)
 
             return img_tensor, label_tensor, img_path, (orig_h, orig_w)
-        else:
+        else:     # 测试
             return img_tensor, img0, img_name
 
-    # @staticmethod
-    # def train_collate_fn(batch):
-    #     img, label, path, shapes = list(zip(*batch))  # transposed
-    #     for i, l in enumerate(label):
-    #         l[:, 0] = i  # add target image index for build_targets()
-    #     return torch.stack(img, 0), torch.cat(label, 0), path, shapes  # TODO：如 batch=4，需要对img和label进行堆叠
+    @staticmethod
+    def train_collate_fn(batch):
+        img, label, path, shapes = list(zip(*batch))  # transposed
+        for i, l in enumerate(label):
+            l[:, 0] = i  # add target image index for build_targets()
+        return torch.stack(img, 0), torch.cat(label, 0), path, shapes  # TODO：如 batch=4，需要对img和label进行堆叠
 
     @staticmethod
     def test_collate_fn(batch):
