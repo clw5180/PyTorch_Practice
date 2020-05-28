@@ -12,6 +12,9 @@ import os
 from tqdm import tqdm
 import time
 
+SHOW = True
+SAVE = False
+
 def detect():
     # 0、初始化一些参数
     cfg = opt.cfg
@@ -32,7 +35,7 @@ def detect():
     model.to(device).eval()
 
     # 2、加载数据集
-    test_dataset = VocDataset(src_txt_path, img_size, is_training=False)
+    test_dataset = VocDataset(src_txt_path, img_size, with_label=False)
     dataloader = DataLoader(test_dataset,
                             batch_size=batch_size,
                             shuffle=False,
@@ -46,11 +49,13 @@ def detect():
         pbar.set_description("Already Processed %d image: " % (i+1))
         # print('clw: Already Processed %d image' % (i+1))
         img_tensor = img_tensor.to(device)   # (bs, 3, 416, 416)
-        pred = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
+        output = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
 
         # NMS
-        pred = non_max_suppression(pred, opt.conf_thres, opt.nms_thres)
-        for batch_idx, det in enumerate(pred):  # detections per image
+        nms_output = non_max_suppression(output, opt.conf_thres, opt.nms_thres)
+
+        # 可视化
+        for batch_idx, det in enumerate(nms_output):  # detections per image
             if det is not None:   # and len(det):  # clw note: important !
                 #or box in det:
                 for *box, conf, _, cls in det: # det: tensor.Size (bs, 7)    box: list
@@ -68,9 +73,12 @@ def detect():
                     plot_one_box([x1, y1, x2, y2], img0[batch_idx], label=label, color=(255, 0, 0))
                     #cv2.rectangle(img0[batch_idx], (x1, y1), (x2, y2), (0, 0, 255), 1)  # 如果报错 TypeError: an integer is required (got type tuple)，检查是不是传入了img_tensor
 
-
-            # 保存结果
-            cv2.imwrite(os.path.join(dst_path, img_name[batch_idx]), img0[batch_idx])
+            if SAVE:
+                # 保存结果
+                cv2.imwrite(os.path.join(dst_path, img_name[batch_idx]), img0[batch_idx])
+            if SHOW:
+                cv2.imshow('aaa', img0[batch_idx])
+                cv2.waitKey(0)
 
     print('time use: %.3fs' %(time.time() - start))
 
@@ -85,7 +93,7 @@ if __name__ == '__main__':
     parser.add_argument('--dst-path', type=str, default='./output', help='save detect result in this folder')
     parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
-    parser.add_argument('--conf-thres', type=float, default=0.5, help='object confidence threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.1, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression, do not be confused with the iou threshold for mAP')
     parser.add_argument('--batch-size', type=int, default=4)
     opt = parser.parse_args()

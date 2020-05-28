@@ -1,9 +1,14 @@
 ### 测试 datasets.py
 # from utils.datasets import VocDataset
-# dataset = VocDataset('D:/valid.txt', img_size=416, is_training=False)
+# dataset = VocDataset('D:/valid.txt', img_size=416, with_label=False)
 # data = dataset[2]
 # print('success !')
 
+import cv2
+
+img = cv2.imread('D:/dataset/val/000001.jpg')
+img = img[:, :, ::-1]
+cv2.imwrite('D:/dataset/val/000001_bgr.jpg', img)
 
 
 

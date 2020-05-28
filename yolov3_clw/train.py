@@ -77,7 +77,7 @@ def train():
     scheduler.last_epoch = start_epoch - 1
 
     # 3、加载数据集
-    train_dataset = VocDataset(train_txt_path, img_size, is_training=True)
+    train_dataset = VocDataset(train_txt_path, img_size, with_label=True)
     dataloader = DataLoader(train_dataset,
                             batch_size=batch_size,
                             shuffle=True,  # TODO: True
@@ -135,13 +135,13 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='xxx.cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
     parser.add_argument('--device', default='0', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
     parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
-    parser.add_argument('--img-size', type=int, default=320, help='resize to this size square and detect')
+    parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--epochs', type=int, default=20)
-    parser.add_argument('--batch-size', type=int, default=2)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--batch-size', type=int, default=1)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     opt = parser.parse_args()
 
     device = select_device(opt.device)

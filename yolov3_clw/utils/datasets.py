@@ -21,7 +21,7 @@ class VocDataset(Dataset):  # for training/testing
     以及图片大小img_size，制作可用于迭代的训练集；
     适用目录结构：cat1.txt放置在和cat1.jpg同一文件夹下，cat1.txt是由当前目录下的cat1.xml通过 xml2txt.py脚本转化而来
     '''
-    def __init__(self, txt_path, img_size, is_training):
+    def __init__(self, txt_path, img_size, with_label):
         # 1、获取所有图片路径，存入 list
         with open(txt_path, 'r') as f:
             self.img_file_paths = [x.replace(os.sep, '/') for x in f.read().splitlines()]
@@ -34,11 +34,11 @@ class VocDataset(Dataset):  # for training/testing
             assert os.path.isfile(txt_file_path), 'No label_file %s found, maybe need to exec xml2txt.py first !' % txt_file_path
             self.label_file_paths.append(txt_file_path)   # 注意除了有 .jpg .png可能还有.JPG甚至其他...
         if len(self.label_file_paths) == 0:
-            is_training = False
-        self.is_training = is_training
+            with_label = False
+        self.with_label = with_label
 
         # 3、transforms and data aug，如必须要做的 Resize(), ToTensor()
-        self.transforms = build_transforms(img_size, is_training)
+        self.transforms = build_transforms(img_size, with_label)
 
     def __len__(self):
         return len(self.img_file_paths)
@@ -48,7 +48,7 @@ class VocDataset(Dataset):  # for training/testing
         # 1、根据 index 读取相应图片，保存图片信息；如果是训练还需要读入label
         img_path = self.img_file_paths[index]
         img_name = img_path.split('/')[-1]
-        if self.is_training:
+        if self.with_label:
             label_path = self.label_file_paths[index]
             with open(label_path, 'r') as f:
                 x = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
@@ -70,13 +70,13 @@ class VocDataset(Dataset):  # for training/testing
         # orig_w, orig_h = img_pil.size
 
 
-        if self.is_training:
+        if self.with_label:
             img_tensor, label_tensor = self.transforms(img, labels)  # 对 img 和 label 都要做相应的变换
         else:
             img_tensor = self.transforms(img)  # ToTensor 已经转化为 3x416x416 并且完成归一化
 
         # 2、根据 index 读取相应标签
-        if self.is_training:  # 训练
+        if self.with_label:  # 训练
             return img_tensor, label_tensor, img_path, (orig_h, orig_w)
         else:     # 测试
             return img_tensor, img0, img_name

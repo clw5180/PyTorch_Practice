@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 import os
 import sys
 import shutil
+from utils.parse_config import parse_data_cfg
+from utils.utils import load_classes
 
 # 从xml文件中提取bounding box信息和w,h信息, 格式为[[x_min, y_min, x_max, y_max, name]]
 def parse_xml(xml_path):
@@ -96,50 +98,55 @@ def xml2txt(image_path,output_txt_file_path, class2indice, append = False ,fix_J
 
 def cloth_train_data(train_path=None, valid_path = None, test_path=None):
 
-    class2indice = {
-        "aeroplane": 0,
-        "bicycle": 1,
-        "bird": 2,
-        "boat": 3,
-        "bottle": 4,
-        "bus": 5,
-        "car": 6,
-        "cat": 7,
-        "chair": 8,
-        "cow": 9,
-        "diningtable": 10,
-        "dog": 11,
-        "horse": 12,
-        "motorbike": 13,
-        "person": 14,
-        "pottedplant": 15,
-        "sheep": 16,
-        "sofa": 17,
-        "train": 18,
-        "tvmonitor": 19
-    }
+    class2indice={}
+    names = load_classes('../cfg/coco.names')
+    for i, name in enumerate(names):
+        class2indice[name] = i
+
+    # class2indice = {
+    #     "aeroplane": 0,
+    #     "bicycle": 1,
+    #     "bird": 2,
+    #     "boat": 3,
+    #     "bottle": 4,
+    #     "bus": 5,
+    #     "car": 6,
+    #     "cat": 7,
+    #     "chair": 8,
+    #     "cow": 9,
+    #     "diningtable": 10,
+    #     "dog": 11,
+    #     "horse": 12,
+    #     "motorbike": 13,
+    #     "person": 14,
+    #     "pottedplant": 15,
+    #     "sheep": 16,
+    #     "sofa": 17,
+    #     "train": 18,
+    #     "tvmonitor": 19
+    # }
 
     if train_path is not None and os.path.exists(train_path):
         xml2txt(train_path, train_save_path,  class2indice)
     else:
-        print("not exists '%s'" %(train_path))
+        print("train path %s not exists !" %(train_path))
 
     if valid_path is not None and os.path.exists(valid_path):
         xml2txt(valid_path, valid_save_path,  class2indice)
     else:
-        print("not exists '%s' or '%s'" %(valid_path, test_path))
+        print("valid path %s not exists !" % (valid_path))
 
     if test_path is not None and os.path.exists(valid_path):
         xml2txt(test_path, test_save_path, class2indice)
     else:
-        print("not exists '%s' or '%s'" % (valid_path, test_path))
+        print("test path %s not exists !" % (test_path))
 
     print('done')
 
 
 if __name__ == "__main__":
 
-    train_path = 'D:/dataset/train'
+    train_path = None
     valid_path = 'D:/dataset/val'
     test_path = None
 
