@@ -60,16 +60,15 @@ class Darknet(nn.Module):
                 output.append(x)
             layer_outputs.append(x if i in self.routs else [])
 
+        # output 是 yolo_layer的输出，注意 self.training的值会影响输出的东西
         if self.training:
-            return output  # list，包含三个tensor，维度(1, 3, 13, 13, 25)，(1, 3, 26, 26, 25)，(1, 3, 52, 52, 25)； 3代表一个yolo_layer含有的anchor数量
+            return output  # list，包含三个tensor，维度(1, 3, 13, 13, 25)，(1, 3, 26, 26, 25)，(1, 3, 52, 52, 25)，其实就是tx,ty,tx,yw
+                           #  3代表一个yolo_layer含有的anchor数量
         else:
             io, p = list(zip(*output))  # output: list，包含三个tuple, 每个tuple有两个元素，0的维度是(1, 507, 25), 1的维度是(1, 3, 13, 13, 25)
-                                        # io: inference output, 也就是yolo_layer的输出经过了 sigmoid 和 exp 后加上当前cell相对于feature map左上角的坐标，得到的feature map的真实坐标
+                                        # io: inference output, 也就是yolo_layer的输出经过了 sigmoid 和 exp 后加上当前cell相对于feature map左上角的坐标，得到的feature map的真实坐标，然后*= self.stride得到映射到原图的真实坐标
                                         # p: training output， 也就是yolo_layer最原始的输出 tx, ty, tw, th, 也就是在当前cell内的坐标偏移
             return torch.cat(io, 1), p
-
-
-
 
 
 def create_modules(module_defs, img_size):

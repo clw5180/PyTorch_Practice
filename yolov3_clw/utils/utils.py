@@ -8,41 +8,60 @@ import random
 import torch.nn as nn
 ####################
 
-def compute_loss(p, targets, model, giou_flag=True):  # predictions, targets, model
-    ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor
-    lcls, lbox, lobj = ft([0]), ft([0]), ft([0])
+def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个list包含3个tensor，维度(1,3,13,13,25), (1,3,26,26,25)....
+    #ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor  # clw note: 暂时不支持cpu，太慢
+
+    lcls, lbox, lobj = torch.cuda.FloatTensor([0]), torch.cuda.FloatTensor([0]), torch.cuda.FloatTensor([0])
     tcls, tbox, indices, anchor_vec = build_targets(model, targets)
     #h = model.hyp  # hyperparameters
 
-    red = 'sum'  # Loss reduction (sum or mean)
+    BCE_reduction_type = 'sum'  # Loss reduction (sum or mean)  # reduction：控制损失输出模式。设为"sum"表示对样本进行求损失和；设为"mean"表示对样本进行求损失的平均值；而设为"none"表示对样本逐个求损失，输出与输入的shape一样。
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([1]), reduction=red)
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([1]), reduction=red)
-    BCE = nn.BCEWithLogitsLoss(reduction=red)
-    CE = nn.CrossEntropyLoss(reduction=red)  # weight=model.class_weights
+    BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.cuda.FloatTensor([1]), reduction=BCE_reduction_type)  # withLogits的含义：输入也就是pred还会经过sigmoid, 然后再和label算二元交叉熵损失
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.cuda.FloatTensor([1]), reduction=BCE_reduction_type)  # 也就是 loss = - [ ylog y^ + (1-y)log(1-y^) ]
+
+    #BCE = nn.BCEWithLogitsLoss(reduction=BCE_reduction_type)
+    #CE = nn.CrossEntropyLoss(reduction=BCE_reduction_type)  # weight=model.class_weights   TODO: 不同类别的损失，设置不同的权重，个人感觉有点类似 focal loss
 
     # Compute losses
     np, ng = 0, 0  # number grid points, targets
-    for i, pi in enumerate(p):  # layer index, layer predictions
-        b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-        tobj = torch.zeros_like(pi[..., 0])  # target obj
-        np += tobj.numel()
+    for i, pi in enumerate(p):  # layer index: 0,1,2   layer predictions: (1,3,13,13,25), (1,3,26,26,25), (1,3,52,52,25)
+        b, a, gj, gi = indices[i]  # target image idx, anchor idx, gt的x_ctr和y_ctr所在cell左上角坐标，整数
+        tobj = torch.zeros_like(pi[..., 0])  # target obj  (1,3,13,13)
+        np += tobj.numel()  # 507=1*3*13*13
 
         # Compute losses
         nb = len(b)
         if nb:  # number of targets
-            ng += nb
-            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
+            ng += nb  # ng 是把 3个layer的 nb 加在一起,
+            ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets； 把gt所在的那个grid cell的预测结果拿出来
             # ps[:, 2:4] = torch.sigmoid(ps[:, 2:4])  # wh power loss (uncomment)
 			#########
-            # GIoU
-            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
-            pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]
-            pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            lbox += (1.0 - giou).sum() if red == 'sum' else (1.0 - giou).mean()  # giou loss
-            tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+            # 1、计算位置损失，这里是GIoU
+            # pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
+            # pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
+            # pbox = torch.cat((pxy, pwh), 1)  # predicted box
+            # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            # #lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
+            # #tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+
+
+            #### clw modify  xywh 用 MSE平方差损失
+            # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
+            # if multi_gpu:
+            #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            # else:
+            #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和tw和th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
+            txy_gt = tbox[i][:, 0:2]             # bx - cx
+            twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
+            gtbox = torch.cat((txy_gt, twh_gt), 1)
+
+            lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  # TODO: / stride
+            tobj[b, a, gj, gi] = 1.0
+            ###
+
             #######
             '''  # old version
             # GIoU
@@ -53,9 +72,10 @@ def compute_loss(p, targets, model, giou_flag=True):  # predictions, targets, mo
             # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
             # lbox += (1.0 - giou).mean()  # giou loss
             giou = 1.0 - bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            lbox += giou.sum() if red == 'sum' else giou.mean()  # giou loss
+            lbox += giou.sum() if BCE_reduction_type == 'sum' else giou.mean()  # giou loss
 			'''
 
+            # 2、计算分类损失，这里只针对多类别，如果只有1个类那么只需要计算 obj 损失
             if model.nc > 1:  # cls loss (only if multiple classes)
                 t = torch.zeros_like(ps[:, 5:])  # targets
                 t[range(nb), tcls[i]] = 1.0
@@ -72,14 +92,15 @@ def compute_loss(p, targets, model, giou_flag=True):  # predictions, targets, mo
             #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
 
 
+        # 3、计算 obj 损失
         lobj += BCEobj(pi[..., 4], tobj)  # obj loss
 
-    lbox *= 3.54 # h['giou']
+    lbox *= 3.54 # h['giou']  TODO
     lobj *= 64.3 # h['obj']
     lcls *= 37.4  # h['cls']
-    if red == 'sum':
+    if BCE_reduction_type == 'sum':
         bs = tobj.shape[0]  # batch size
-        lobj *= 3 / (6300 * bs) * 2  # 3 / np * 2
+        lobj *= 3 / (6300 * bs) * 2  # 3 / np * 2   TODO
         if ng:
             lcls *= 3 / ng / model.nc
             lbox *= 3 / ng
@@ -95,57 +116,57 @@ def compute_loss(p, targets, model, giou_flag=True):  # predictions, targets, mo
 def build_targets(model, targets):
     # targets = [image, class, x, y, w, h]
 
-    nt = len(targets)
+    nt = len(targets)   # targets 维度 (n, 6)  nt: number of target
     tcls, tbox, indices, av = [], [], [], []
-    multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+    multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
     reject, use_all_anchors = True, True
     for i in model.yolo_layers:
         # get number of grid points and anchor vec for this yolo layer
         if multi_gpu:
             ng, anchor_vec = model.module.module_list[i].ng, model.module.module_list[i].anchor_vec
         else:
-            ng, anchor_vec = model.module_list[i].ng, model.module_list[i].anchor_vec
-
+            ng, anchor_vec = model.module_list[i].ng, model.module_list[i].anchor_vec  # ng:[13, 13]  anchor tensor([[ 3.6250,  2.8125],[ 4.8750,  6.1875], [11.6562, 10.1875]]
+                                                                                       # anchor 在yololayer forward创建， /stride,  116/32=3.625, 90/32=2.8125...
         # iou of targets-anchors
         t, a = targets, []
-        gwh = t[:, 4:6] * ng
+        gwh = t[:, 4:6] * ng  # gt换算到三个feature map的 wh
         if nt:
-            iou = torch.stack([wh_iou(x, gwh) for x in anchor_vec], 0)
+            iou = torch.stack([wh_iou(x, gwh) for x in anchor_vec], 0)  # 假设了 anchor 在 gt内部？ TODO
 
 
             if use_all_anchors:
                 na = len(anchor_vec)  # number of anchors
-                a = torch.arange(na).view((-1, 1)).repeat([1, nt]).view(-1)
+                a = torch.arange(na).view((-1, 1)).repeat([1, nt]).view(-1)  # anchor的idx，表明是第几个anchor
                 t = targets.repeat([na, 1])
                 gwh = gwh.repeat([na, 1])
                 iou = iou.view(-1)  # use all ious
             else:  # use best anchor only
                 iou, a = iou.max(0)  # best iou and anchor
 
-            # reject anchors below iou_thres (OPTIONAL, increases P, lowers R)
-            if reject:
+            if reject:  # reject anchors below iou_thres (OPTIONAL, increases P, lowers R)
                 j = iou.view(-1) > 0.2  # model.hyp['iou_t']  # iou threshold hyperparameter
                 #j = iou > model.hyp['iou_t']  # iou threshold hyperparameter
                 t, a, gwh = t[j], a[j], gwh[j]
 
         # Indices
-        b, c = t[:, :2].long().t()  # target image, class
+        b, c = t[:, :2].long().t()  # target image idx, class
         gxy = t[:, 2:4] * ng  # grid x, y
         gi, gj = gxy.long().t()  # grid x, y indices
-        indices.append((b, a, gj, gi))
+        indices.append((b, a, gj, gi))  # target image idx, anchor idx, gt的x_ctr和y_ctr所在cell左上角坐标，整数
 
         # GIoU
-        gxy -= gxy.floor()  # xy
+        gxy -= gxy.floor()  # gt的x_ctr和y_ctr所在cell 偏移量   # TODO !!!
         tbox.append(torch.cat((gxy, gwh), 1))  # xywh (grids)
-        av.append(anchor_vec[a])  # anchor vec
+        av.append(anchor_vec[a])  # anchor vec，就是iou超过threshold的 anchor index
 
         # Class
         tcls.append(c)
         if c.shape[0]:  # if any targets
             assert c.max() < model.nc, 'Target class_idx exceed total model classes'
 
-    return tcls, tbox, indices, av
-
+    return tcls, tbox, indices, av  # t表示target，也就是gt，tbox: (n, 4) n代表iou超过threshold的 anchor个数，
+                                    # 比如n=2且只有1个target，那么2行的内容都是一样的，意思是该层yolo_layer有2个anchor命中该target
+                                    # tbox列的4个值xywh，xy是当前grid cell内的坐标，wh是gt映射到当前feature map的wh
 
 def wh_iou(box1, box2):
     # Returns the IoU of wh1 to wh2. wh1 is 2, wh2 is nx2

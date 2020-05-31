@@ -11,31 +11,40 @@ import os
 from tqdm import tqdm
 import time
 import numpy as np
-
+import torch.nn as nn
 
 SHOW = True
 SAVE = False
 
-def test():
+def test(cfg,
+         data,
+         img_size,
+         conf_thres,
+         iou_thres,
+         nms_thres,
+         src_txt_path='./valid.txt',
+         dst_path='./output',
+         weights=None,
+         model=None):
+
     # 0、初始化一些参数
-    cfg = opt.cfg
-    weights = opt.weights
-    src_txt_path = opt.src_txt_path
-    img_size = opt.img_size
-    batch_size = opt.batch_size
-    dst_path = opt.dst_path
-    iou_thres = opt.iou_thres
+    batch_size = 4
     if not os.path.exists(dst_path):
         os.mkdir(dst_path)
-    device = select_device(opt.device)
-    data = parse_data_cfg(opt.data)
+    data = parse_data_cfg(data)
     nc = int(data['classes'])  # number of classes
     names = load_classes(data['names'])
 
     # 1、加载网络
-    model = Darknet(cfg)
-    if weights.endswith('.pt'):      # TODO: .weights权重格式
-        model.load_state_dict(torch.load(weights)['model'])  # TODO：map_location=device ？
+    if model is None:
+        device = select_device(opt.device)
+        model = Darknet(cfg)
+        if weights.endswith('.pt'):      # TODO: .weights权重格式
+            model.load_state_dict(torch.load(weights)['model'])  # TODO：map_location=device ？
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)  # clw note: 多卡
+    else:
+        device = next(model.parameters()).device  # get model device
     model.to(device).eval()
 
     # 2、加载数据集
@@ -63,7 +72,7 @@ def test():
         output = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
 
         # NMS
-        nms_output = non_max_suppression(output, opt.conf_thres, opt.nms_thres)
+        nms_output = non_max_suppression(output, conf_thres, nms_thres)
         for batch_idx, pred in enumerate(nms_output):  # detections per image   for *box, conf, _, cls in det: # det: tensor.Size (bs, 7)    box: list
             labels = target_tensor[target_tensor[:, 0] == batch_idx, 1:]
             nl = len(labels)  # len of label
@@ -169,11 +178,20 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--conf-thres', type=float, default=0.1, help='object confidence threshold')
-    parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold for compute mAP')
-    parser.add_argument('--batch-size', type=int, default=1)
+    parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
+
+    ###parser.add_argument('--batch-size', type=int, default=1)
     opt = parser.parse_args()
     print(opt)
 
     with torch.no_grad():
-        test()
+        test(opt.cfg,
+             opt.data,
+             opt.img_size,
+             opt.conf_thres,
+             opt.iou_thres,
+             opt.nms_thres,
+             opt.src_txt_path,
+             opt.dst_path,
+             weights=opt.weights)

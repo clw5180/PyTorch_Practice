@@ -4,11 +4,21 @@
 # data = dataset[2]
 # print('success !')
 
-import cv2
+import torch
 
-img = cv2.imread('D:/dataset/val/000001.jpg')
-img = img[:, :, ::-1]
-cv2.imwrite('D:/dataset/val/000001_bgr.jpg', img)
+a = torch.tensor([1,2,3,4])
+b = torch.tensor([1,3,5,7])
+c = a-b
+d = c*c
+print(c)
+print(d)
+
+
+# import cv2
+#
+# img = cv2.imread('D:/dataset/val/000001.jpg')
+# img = img[:, :, ::-1]
+# cv2.imwrite('D:/dataset/val/000001_bgr.jpg', img)
 
 
 

@@ -10,9 +10,13 @@ from tqdm import tqdm
 from utils.utils import compute_loss
 import os
 import time
+import test
+import torch.nn as nn
+import torch.distributed as dist  # clw note: TODO
 
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"  # 打印出更多的异常细节
+# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"  # 打印出更多的异常细节   TODO
 
+last_model_path = 'weights/last.pt'
 
 ### 超参数
 lr0 = 1e-4
@@ -41,10 +45,10 @@ def train():
     batch_size = opt.batch_size
     total_epochs = opt.epochs
     init_seeds()
-    data_dict = parse_data_cfg(opt.data)
-    train_txt_path = data_dict['train']
-    valid_txt_path = data_dict['valid']
-    nc = int(data_dict['classes'])
+    data = parse_data_cfg(opt.data)
+    train_txt_path = data['train']
+    valid_txt_path = data['valid']
+    nc = int(data['classes'])
 
     # 1、加载模型
     model = Darknet(cfg).to(device).train()
@@ -62,14 +66,24 @@ def train():
             s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
             raise KeyError(s) from e
 
-    # print(model)
-    model.nc = nc
 
     # 2、设置优化器 和 学习率
     start_epoch = 0
     optimizer = torch.optim.SGD(model.parameters(), lr=lr0)
+    ###### apex need ######
     if mixed_precision:
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
+    # Initialize distributed training
+    if torch.cuda.device_count() > 1:
+        dist.init_process_group(backend='nccl',  # 'distributed backend'
+                                init_method='tcp://127.0.0.1:9999',  # distributed training init method
+                                world_size=1,  # number of nodes for distributed training
+                                rank=0)  # distributed training node rank
+        model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)  # clw note: 多卡,在 amp.initialize()之后调用分布式代码 DistributedDataParallel否则报错
+        model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
+    ######
+    model.nc = nc
+
     scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(total_epochs * x) for x in [0.8, 0.9]], gamma=0.1)
     ### 余弦学习率
     #lf = lambda x: (1 + math.cos(x * math.pi / total_epochs)) / 2
@@ -82,7 +96,8 @@ def train():
                             batch_size=batch_size,
                             shuffle=True,  # TODO: True
                             num_workers=0,
-                            collate_fn=train_dataset.train_collate_fn)
+                            collate_fn=train_dataset.train_collate_fn,
+                            pin_memory=True)  # TODO：貌似很重要，否则容易炸显存
 
 
     # 4、训练
@@ -90,10 +105,12 @@ def train():
     nb = len(dataloader)
 
     for epoch in range(start_epoch, total_epochs):  # epoch ------------------------------
+        start = time.time()
         mloss = torch.zeros(4).to(device)  # mean losses
         print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
-        pbar = tqdm(dataloader, ncols=20)  # 行数参数ncols=10，这个值可以自己调：尽量大到不能引起上下滚动，同时满足美观的需求。
-        for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
+        #pbar = tqdm(dataloader, ncols=20)  # 行数参数ncols=10，这个值可以自己调：尽量大到不能引起上下滚动，同时满足美观的需求。
+        #for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
+        for i, (img_tensor, target_tensor, img_path, _) in enumerate(dataloader):
             #print(img_path)
             img_tensor = img_tensor.to(device)
             target_tensor = target_tensor.to(device)
@@ -122,11 +139,33 @@ def train():
             mem = torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0  # (GB)
             s = ('%10s' * 2 + '%10.3g' * 6) % (
                 '%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size)
-            pbar.set_description(s)
+
+            #pbar.set_description(s)
+            ### for debug
+            if i % 10 == 0:
+                print(s)
             # end batch ------------------------------------------------------------------------------------------------
+
+        print('clw: time use per epoch: %.3fs' % (time.time() - start))
 
         # Update scheduler
         scheduler.step()
+
+        # compute mAP
+        results, maps = test.test(cfg,
+                                  'cfg/voc.data',
+                                  img_size=img_size,
+                                  conf_thres=0.05,
+                                  iou_thres=0.5,
+                                  nms_thres=0.5,
+                                  model=model)
+
+        # save model 保存模型
+        chkpt = {'epoch': epoch,
+                 'model': model.module.state_dict() if type(model) is nn.parallel.DistributedDataParallel else model.state_dict(),  # clw note: 多卡
+                 'optimizer': optimizer.state_dict()}
+
+        torch.save(chkpt, last_model_path)
 
     print('end')
 
@@ -137,11 +176,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
-    parser.add_argument('--device', default='0', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
+    parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
     parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--epochs', type=int, default=20)
-    parser.add_argument('--batch-size', type=int, default=1)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     opt = parser.parse_args()
 
     device = select_device(opt.device)

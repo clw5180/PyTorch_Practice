@@ -99,7 +99,7 @@ def xml2txt(image_path,output_txt_file_path, class2indice, append = False ,fix_J
 def cloth_train_data(train_path=None, valid_path = None, test_path=None):
 
     class2indice={}
-    names = load_classes('../cfg/coco.names')
+    names = load_classes('../cfg/voc.names')
     for i, name in enumerate(names):
         class2indice[name] = i
 
@@ -146,8 +146,10 @@ def cloth_train_data(train_path=None, valid_path = None, test_path=None):
 
 if __name__ == "__main__":
 
-    train_path = None
-    valid_path = 'D:/dataset/val'
+    # train_path = 'D:/dataset/train'
+    # valid_path = 'D:/dataset/val'
+    train_path = '/home/user/dataset/voc2007/train'
+    valid_path = '/home/user/dataset/voc2007/val'
     test_path = None
 
     train_save_path = '../train.txt'
