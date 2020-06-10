@@ -1,5 +1,6 @@
 # custom
 *.pt
+*.pth
 *.weights
 *.conv.*
 *.jpg

@@ -20,12 +20,12 @@ from utils.datasets import VocDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from utils.utils import compute_loss
+from utils.utils import load_darknet_weights
 import os
 import time
 import test
 import torch.nn as nn
 import torch.distributed as dist  # clw note: TODO
-
 
 ### 超参数
 lr0 = 1e-3
@@ -65,7 +65,7 @@ def train():
 
     # 1、加载模型
     model = Darknet(cfg).to(device)
-    if weights.endswith('.pt'):      # TODO: .weights权重格式
+    if weights.endswith('.pt') or weights.endswith('.pth'):      # TODO: .weights权重格式
 
         ### model.load_state_dict(torch.load(weights)['model']) # 错误原因：没有考虑类别对不上的那一层，也就是yolo_layer前一层
                                                                 #          会报错size mismatch for module_list.81.Conv2d.weight: copying a param with shape torch.Size([255, 1024, 1, 1]) from checkpoint, the shape in current model is torch.Size([75, 1024, 1, 1]).
@@ -78,6 +78,12 @@ def train():
         except KeyError as e:
             s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
             raise KeyError(s) from e
+    elif len(weights) > 0:  # darknet format
+        # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
+        load_darknet_weights(model, weights)
+    else:
+        raise Exception("pretrained model's path can't be NULL!")
+
 
 
     # 2、设置优化器 和 学习率
@@ -199,9 +205,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
-    parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
-    parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
-    parser.add_argument('--img-size', type=int, default=448, help='resize to this size square and detect')
+    parser.add_argument('--device', default='0', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
+    #parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
+    parser.add_argument('--weights', type=str, default='weights/resnet50.pth', help='path to weights file')
+    parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     opt = parser.parse_args()

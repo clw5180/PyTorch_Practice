@@ -18,7 +18,8 @@ def parse_model_cfg(path):
     for line in lines:
         if line.startswith('['):  # This marks the start of a new block
             mdefs.append({})
-            mdefs[-1]['type'] = line[1:-1].rstrip()
+            #mdefs[-1]['type'] = line[1:-1].rstrip()
+            mdefs[-1]['type'] = line[1:(line.find(']'))].rstrip()  # clw modify: 这样可以支持在后面加#注释
             if mdefs[-1]['type'] == 'convolutional':
                 mdefs[-1]['batch_normalize'] = 0  # pre-populate with zeros (may be overwritten later)
         else:
