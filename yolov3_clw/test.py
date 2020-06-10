@@ -52,27 +52,31 @@ def test(cfg,
     dataloader = DataLoader(valid_dataset,
                             batch_size=batch_size,
                             shuffle=False,
-                            num_workers=0,    # TODO
-                            collate_fn=valid_dataset.train_collate_fn)   # TODO
+                            num_workers=4,    # TODO
+                            collate_fn=valid_dataset.train_collate_fn,   # TODO
+                            pin_memory=True)  # TODO：貌似很重要，否则容易炸显存
 
     # 3、预测，前向传播
     image_nums = 0
-    #s = ('%20s' + '%10s' * 6) % ('Class', 'Image_num', 'Target_num', 'P', 'R', 'mAP@{}'.format(iou_thres), 'F1')
-    s = ('%20s' + '%10s' * 6) % ('Class', 'ImgNum', 'Target', 'P', 'R', 'mAP@{}'.format(iou_thres), 'F1')
+    s = ('%20s' + '%10s' * 6) % ('Class', 'Images', 'Targets', 'P', 'R', 'mAP@{}'.format(iou_thres), 'F1')
+    #s = ('%20s' + '%10s' * 6) % ('Class', 'ImgNum', 'Target', 'P', 'R', 'mAP@0.5', 'F1')
 
     p, r, f1, mp, mr, map, mf1 = 0., 0., 0., 0., 0., 0., 0.
     jdict, stats, ap, ap_class = [], [], [], []
 
-    pbar = tqdm(dataloader, desc=s) #, ncols=10)
+    pbar = tqdm(dataloader)
     for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
         img_tensor = img_tensor.to(device)   # (bs, 3, 416, 416)
         target_tensor = target_tensor.to(device)
+        pbar.set_description(s)
 
-        # (1) Run model
-        output = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
+        # Disable gradients
+        with torch.no_grad():
+            # (1) Run model
+            output = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
+            # (2) NMS
+            nms_output = non_max_suppression(output, conf_thres, nms_thres)
 
-        # NMS
-        nms_output = non_max_suppression(output, conf_thres, nms_thres)
         for batch_idx, pred in enumerate(nms_output):  # detections per image   for *box, conf, _, cls in det: # det: tensor.Size (bs, 7)    box: list
             labels = target_tensor[target_tensor[:, 0] == batch_idx, 1:]
             nl = len(labels)  # len of label
@@ -194,4 +198,4 @@ if __name__ == '__main__':
              opt.nms_thres,
              opt.src_txt_path,
              opt.dst_path,
-             weights=opt.weights)
+             opt.weights)

@@ -1,7 +1,7 @@
 # -*- coding=utf-8 -*-
 # 功能：(1)在xml_filepath对应路径下生成同名.txt文件，如 00001.txt 记录的坐标是归一化之后的
 #       (2)记录所有图片的路径到 train.txt 或 valid.txt 文件中
-# 输入：train_path， valid_path，test_path
+# 输入：train_path， valid_path，test_path, class_name_path = '../cfg/coco.names'
 #       train_save_path 默认为 '../train.txt'
 
 import xml.etree.ElementTree as ET
@@ -10,6 +10,13 @@ import sys
 import shutil
 from utils.parse_config import parse_data_cfg
 from utils.utils import load_classes
+
+train_path = '/home/user/dataset/voc2007/train'
+#train_path = None
+valid_path = '/home/user/dataset/voc2007/val'
+test_path = None
+class_name_path = '../cfg/voc.names' # 数据集类别名 list， 如 voc.names   coco.names
+
 
 # 从xml文件中提取bounding box信息和w,h信息, 格式为[[x_min, y_min, x_max, y_max, name]]
 def parse_xml(xml_path):
@@ -97,34 +104,12 @@ def xml2txt(image_path,output_txt_file_path, class2indice, append = False ,fix_J
     pass
 
 def cloth_train_data(train_path=None, valid_path = None, test_path=None):
-
+    ###
     class2indice={}
-    names = load_classes('../cfg/voc.names')
+    names = load_classes(class_name_path)
     for i, name in enumerate(names):
         class2indice[name] = i
-
-    # class2indice = {
-    #     "aeroplane": 0,
-    #     "bicycle": 1,
-    #     "bird": 2,
-    #     "boat": 3,
-    #     "bottle": 4,
-    #     "bus": 5,
-    #     "car": 6,
-    #     "cat": 7,
-    #     "chair": 8,
-    #     "cow": 9,
-    #     "diningtable": 10,
-    #     "dog": 11,
-    #     "horse": 12,
-    #     "motorbike": 13,
-    #     "person": 14,
-    #     "pottedplant": 15,
-    #     "sheep": 16,
-    #     "sofa": 17,
-    #     "train": 18,
-    #     "tvmonitor": 19
-    # }
+    ###
 
     if train_path is not None and os.path.exists(train_path):
         xml2txt(train_path, train_save_path,  class2indice)
@@ -148,9 +133,6 @@ if __name__ == "__main__":
 
     # train_path = 'D:/dataset/train'
     # valid_path = 'D:/dataset/val'
-    train_path = '/home/user/dataset/voc2007/train'
-    valid_path = '/home/user/dataset/voc2007/val'
-    test_path = None
 
     train_save_path = '../train.txt'
     valid_save_path = '../valid.txt'

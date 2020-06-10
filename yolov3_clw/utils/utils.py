@@ -18,51 +18,50 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
     BCE_reduction_type = 'sum'  # Loss reduction (sum or mean)  # reduction：控制损失输出模式。设为"sum"表示对样本进行求损失和；设为"mean"表示对样本进行求损失的平均值；而设为"none"表示对样本逐个求损失，输出与输入的shape一样。
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.cuda.FloatTensor([1]), reduction=BCE_reduction_type)  # withLogits的含义：输入也就是pred还会经过sigmoid, 然后再和label算二元交叉熵损失
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.cuda.FloatTensor([1]), reduction=BCE_reduction_type)  # 也就是 loss = - [ ylog y^ + (1-y)log(1-y^) ]
-
-    #BCE = nn.BCEWithLogitsLoss(reduction=BCE_reduction_type)
-    #CE = nn.CrossEntropyLoss(reduction=BCE_reduction_type)  # weight=model.class_weights   TODO: 不同类别的损失，设置不同的权重，个人感觉有点类似 focal loss
+    #BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.cuda.FloatTensor([1]), reduction=BCE_reduction_type)  # withLogits的含义：输入也就是pred还会经过sigmoid, 然后再和label算二元交叉熵损失
+                                                                                                          # clw note：loss = - [ ylog y^ + (1-y)log(1-y^) ]  其中y^是yolo_layer层输出的结果 tcls 经过 sigmoid 函数得到的，将输出结果转换到0~1之间，即该目标属于不同类别的概率值
+    CEcls = nn.CrossEntropyLoss(reduction=BCE_reduction_type)
+    BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.cuda.FloatTensor([1]), reduction=BCE_reduction_type)  # 可选参数 weight=model.class_weights   TODO: 不同类别的损失，设置不同的权重，个人感觉有点类似 focal loss
 
     # Compute losses
-    np, ng = 0, 0  # number grid points, targets
+    np, nt = 0, 0  # number grid points, # number of targets in 3 yolo_layers
     for i, pi in enumerate(p):  # layer index: 0,1,2   layer predictions: (1,3,13,13,25), (1,3,26,26,25), (1,3,52,52,25)
         b, a, gj, gi = indices[i]  # target image idx, anchor idx, gt的x_ctr和y_ctr所在cell左上角坐标，整数
         tobj = torch.zeros_like(pi[..., 0])  # target obj  (1,3,13,13)
         np += tobj.numel()  # 507=1*3*13*13
 
         # Compute losses
-        nb = len(b)
-        if nb:  # number of targets
-            ng += nb  # ng 是把 3个layer的 nb 加在一起,
+        nb = len(b)   # or b.shape[0] , number of targets in one yolo_layer
+        if nb:
+            nt += nb  # ng 是把 3个layer的 nb 加在一起,
             ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets； 把gt所在的那个grid cell的预测结果拿出来
             # ps[:, 2:4] = torch.sigmoid(ps[:, 2:4])  # wh power loss (uncomment)
+
 			#########
             # 1、计算位置损失，这里是GIoU
             # pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
             # pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
             # pbox = torch.cat((pxy, pwh), 1)  # predicted box
             # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            # #lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
-            # #tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
-
+            # lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
+            # tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+            #########
 
             #### clw modify  xywh 用 MSE平方差损失
-            # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
+            # # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
             # if multi_gpu:
             #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
             # else:
             #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
-            pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和tw和th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
-            txy_gt = tbox[i][:, 0:2]             # bx - cx
+            pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和 tw 和 th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
+            txy_gt = tbox[i][:, 0:2]   # bx - cx
             twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
             gtbox = torch.cat((txy_gt, twh_gt), 1)
-
-            lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  # TODO: / stride
+            lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  if BCE_reduction_type == 'sum' else  ((pbox - gtbox) * (pbox - gtbox)).mean()  # TODO: / stride
             tobj[b, a, gj, gi] = 1.0
             ###
 
-            #######
+
             '''  # old version
             # GIoU
 			tobj[b, a, gj, gi] = 1.0  # obj
@@ -79,8 +78,8 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
             if model.nc > 1:  # cls loss (only if multiple classes)
                 t = torch.zeros_like(ps[:, 5:])  # targets
                 t[range(nb), tcls[i]] = 1.0
-                lcls += BCEcls(ps[:, 5:], t)  # BCE
-                # lcls += CE(ps[:, 5:], tcls[i])  # CE
+                #lcls += BCEcls(ps[:, 5:], t)  # BCE    # clw note: t的torch.Size是 (308, 20), 形如 [0, 0, ...., 1, 0, 0]
+                lcls += CEcls(ps[:, 5:], tcls[i])  # TODO: 使用 CE    #  tcls是一个list，含有3个tensor，每个torch.Size是308，形如 [2 1 14 14 14 6...]
 
                 # Instance-class weighting (use with reduction='none')
                 # nt = t.sum(0) + 1  # number of targets per class
@@ -100,14 +99,12 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
     lcls *= 37.4  # h['cls']
     if BCE_reduction_type == 'sum':
         bs = tobj.shape[0]  # batch size
-        lobj *= 3 / (6300 * bs) * 2  # 3 / np * 2   TODO
-        if ng:
-            lcls *= 3 / ng / model.nc
-            lbox *= 3 / ng
-        # old version
-	    #lbox *= 3 / ng
-        #lobj *= 3 / np
-        #lcls *= 3 / ng / model.nc
+        loss_gain = 3  # loss gain
+        #lobj *= loss_gain / bs   # TODO: 需要写成下面这样 3 / (6300 * bs) * 2 = 3e-5，否则损失无穷大
+        lobj *= 3 / (6300 * bs) * 2
+        if nt:  # 如果图片内有 target 也就是 gt，说明不是负样本，因此要计算 lcls 和 lbox
+            lcls *= loss_gain / nt / model.nc
+            lbox *= loss_gain / nt
 
     loss = lbox + lobj + lcls
     return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
@@ -196,7 +193,7 @@ def select_device(device):  # 暂时不支持 CPU
     #if nums_of_gpu > 1 and batch_size:    # TODO: 多卡，batch_size不能被卡的总数整除 check that batch_size is compatible with device_count
     #    assert batch_size % nums_of_gpu == 0, 'batch-size %g not multiple of GPU count %g' % (batch_size, nums_of_gpu)
     x = [torch.cuda.get_device_properties(i) for i in range(nums_of_gpu)]
-    s = 'Using CUDA'
+    s = 'Using CUDA '
     for i in range(0, nums_of_gpu):
         if i == 1:
             s = ' ' * len(s)
@@ -208,7 +205,7 @@ def select_device(device):  # 暂时不支持 CPU
            device1 _CudaDeviceProperties(name='GeForce GTX 1080', total_memory=8119MB)
     '''
 
-    return torch.device('cuda:0')
+    return torch.device('cuda')
 
 
 def xyxy2xywh(x):

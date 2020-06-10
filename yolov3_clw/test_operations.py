@@ -5,13 +5,13 @@
 # print('success !')
 
 import torch
-
-a = torch.tensor([1,2,3,4])
-b = torch.tensor([1,3,5,7])
-c = a-b
-d = c*c
-print(c)
-print(d)
+import torch.nn as nn
+import torch.nn.functional as F
+a = torch.tensor([1., 2, 3, 4])
+b = torch.tensor([4., 5, 6, 7])
+loss_fn = nn.L1Loss(reduction='sum')
+loss = loss_fn(a, b)
+print(loss)
 
 
 # import cv2
