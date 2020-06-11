@@ -32,7 +32,7 @@ class Residual(nn.Module):  # 本类已保存在d2lzh_pytorch包中方便以后�
 
 
 
-class ResNet(nn.Module):  # 11 million parameters
+class ResNet18(nn.Module):  # 11 million parameters
     def __init__(self, ):
         super(ResNet, self).__init__()
 
@@ -73,7 +73,7 @@ class ResNet(nn.Module):  # 11 million parameters
         return nn.Sequential(*blk)
 
 if __name__ == "__main__":
-    net = ResNet()
+    net = ResNet18()
     print(net)
     torch_utils.model_info(net, report='full')  # 'full' or 'summary'
 
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
 
 '''
-1、ResNet结构：
+1、ResNet18结构：
 ResNet(
   (conv): Sequential(
     (0): Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3))

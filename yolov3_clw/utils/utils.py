@@ -601,7 +601,9 @@ def load_darknet_weights(self, weights, cutoff=-1):
     elif 'yolov3-tiny.conv.15' in weights:
         cutoff = 15
     elif 'resnet50.pth' in weights:
-        cutoff = 66
+        cutoff = 74
+    elif 'resnet18.pth' in weights:
+        cutoff = 31
 
     # Read weights file
     with open(weights, 'rb') as f:
@@ -644,6 +646,7 @@ def load_darknet_weights(self, weights, cutoff=-1):
             # Load conv. weights
             num_w = conv_layer.weight.numel()
             conv_w = torch.from_numpy(weights[ptr:ptr + num_w]).view_as(conv_layer.weight)
+            # print(i, weights[ptr])  # clw add: for debug
             conv_layer.weight.data.copy_(conv_w)
             ptr += num_w
 

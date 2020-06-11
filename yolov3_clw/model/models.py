@@ -55,6 +55,7 @@ class Darknet(nn.Module):
                     # print(''), [print(layer_outputs[i].shape) for i in layers], print(x.shape)
             elif mtype == 'shortcut':
                 x = x + layer_outputs[int(mdef['from'])]
+
             elif mtype == 'yolo':
                 x = module(x, img_size)
                 output.append(x)

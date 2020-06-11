@@ -65,7 +65,8 @@ def train():
 
     # 1、加载模型
     model = Darknet(cfg).to(device)
-    if weights.endswith('.pt') or weights.endswith('.pth'):      # TODO: .weights权重格式
+
+    if weights.endswith('.pt'):
 
         ### model.load_state_dict(torch.load(weights)['model']) # 错误原因：没有考虑类别对不上的那一层，也就是yolo_layer前一层
                                                                 #          会报错size mismatch for module_list.81.Conv2d.weight: copying a param with shape torch.Size([255, 1024, 1, 1]) from checkpoint, the shape in current model is torch.Size([75, 1024, 1, 1]).
@@ -78,6 +79,37 @@ def train():
         except KeyError as e:
             s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
             raise KeyError(s) from e
+    elif weights.endswith('.pth'):    # for 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
+        #model_state_dict = model.state_dict()
+        chkpt = torch.load(weights, map_location=device)
+        #try:
+        state_dict = {}
+        block_cnt = 0
+        fc_item_num = 2
+        chkpt_keys = list(chkpt.keys())
+        model_keys = list(model.state_dict().keys())
+        model_values = list(model.state_dict().values())
+        for i in range(len(chkpt_keys) - fc_item_num):  # 102 - 2
+            if i % 5 == 0:
+                state_dict[model_keys[i+block_cnt]] = chkpt[chkpt_keys[i]]
+            elif i % 5 == 1 or i % 5 == 2:
+                state_dict[model_keys[i+block_cnt+2]] = chkpt[chkpt_keys[i]]
+            elif i % 5 == 3 or i % 5 == 4:
+                state_dict[model_keys[i+block_cnt-2]] = chkpt[chkpt_keys[i]]
+                if i % 5 == 4:
+                    block_cnt += 1
+                    state_dict[model_keys[i + block_cnt]] = model_values[i + block_cnt]
+
+
+        #chkpt['model'] = {k: v for k, v in chkpt['model'].items() if model.state_dict()[k].numel() == v.numel()}
+        model.load_state_dict(state_dict, strict=False)
+
+        # model.load_state_dict(chkpt['model'])
+
+        # except KeyError as e:
+        #     s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
+        #     raise KeyError(s) from e
+
     elif len(weights) > 0:  # darknet format
         # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
         load_darknet_weights(model, weights)
@@ -145,7 +177,7 @@ def train():
             # (2) 计算损失
             loss, loss_items = compute_loss(pred, target_tensor, model)
             if not torch.isfinite(loss):
-                raise Exception('WARNING: non-finite loss, ending training ', loss_items)
+               raise Exception('WARNING: non-finite loss, ending training ', loss_items)
 
             # (3) 损失：反向传播，求出梯度
             if mixed_precision:
@@ -203,14 +235,19 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/resnet18.cfg', help='xxx.cfg file path')
+    #parser.add_argument('--cfg', type=str, default='cfg/resnet50.cfg', help='xxx.cfg file path')
+    # parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
-    parser.add_argument('--device', default='0', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
+    parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
+    parser.add_argument('--weights', type=str, default='weights/resnet18.pth', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/resnet50.pth', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
-    parser.add_argument('--weights', type=str, default='weights/resnet50.pth', help='path to weights file')
+    # parser.add_argument('--weights', type=str, default='weights/darknet53.conv.74', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--epochs', type=int, default=20)
+    #parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     opt = parser.parse_args()
 
