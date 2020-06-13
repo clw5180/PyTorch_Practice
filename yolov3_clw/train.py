@@ -8,11 +8,9 @@
 # （1）img_size=416 bs=64 一个batch用时 0.56s，大概是 bs=32用时的1.3倍，但是batch总数只有原来的0.5倍，实测 1个epoch用时是单卡的 0.7倍
 
 
-
-
 import argparse
 from model.models import Darknet
-from utils.utils import select_device, init_seeds
+from utils.utils import select_device, init_seeds, plot_images
 from utils.parse_config import parse_data_cfg
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
@@ -25,7 +23,8 @@ import os
 import time
 import test
 import torch.nn as nn
-import torch.distributed as dist  # clw note: TODO
+import torch.distributed as dist  #   clw note: TODO
+from torch.utils.tensorboard import SummaryWriter
 
 ### 超参数
 lr0 = 1e-3
@@ -63,6 +62,10 @@ def train():
     valid_txt_path = data['valid']
     nc = int(data['classes'])
 
+    # 0、打印配置文件信息，写log等
+    print('clw: config file:', cfg)
+    print('clw: pretrained weights:', weights)
+
     # 1、加载模型
     model = Darknet(cfg).to(device)
 
@@ -80,7 +83,7 @@ def train():
             s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
             raise KeyError(s) from e
     elif weights.endswith('.pth'):    # for 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
-        #model_state_dict = model.state_dict()
+        model_state_dict = model.state_dict()
         chkpt = torch.load(weights, map_location=device)
         #try:
         state_dict = {}
@@ -148,14 +151,16 @@ def train():
                             shuffle=True,  # TODO: True
                             num_workers=4,
                             collate_fn=train_dataset.train_collate_fn,
-                            pin_memory=True)  # TODO：貌似很重要，否则容易炸显存？
+                            pin_memory=True)
 
 
     # 4、训练
+    print('')   # 换行
     print('Starting training for %g epochs...' % total_epochs)
     nb = len(dataloader)
 
     mloss = torch.zeros(4).to(device)  # mean losses
+    writer = SummaryWriter()    # tensorboard --logdir=runs, view at http://localhost:6006/
     for epoch in range(start_epoch, total_epochs):  # epoch ------------------------------
         model.train()  # 写在这里，是因为在一个epoch结束后，调用test.test()时，会调用 model.eval()
 
@@ -202,6 +207,15 @@ def train():
             ### for debug ###
             if i % 10 == 0:
                 print(s)
+                
+            # Plot
+            if epoch == start_epoch  and i == 0:
+                fname = 'train_batch.jpg' # filename
+                cur_path = os.getcwd()
+                res = plot_images(images=img_tensor, targets=target_tensor, paths=img_path, fname=os.path.join(cur_path, fname))
+                writer.add_image(fname, res, dataformats='HWC', global_step=epoch)
+                # tb_writer.add_graph(model, imgs)  # add model to tensorboard
+                
             # end batch ------------------------------------------------------------------------------------------------
 
         print('clw: time use per epoch: %.3fs' % (time.time() - start))
@@ -210,16 +224,23 @@ def train():
         scheduler.step()
 
         # compute mAP
-        test.test(cfg,
-                  'cfg/voc.data',
-                  img_size=img_size,
-                  conf_thres=0.05,
-                  iou_thres=0.5,
-                  nms_thres=0.5,
-                  src_txt_path=valid_txt_path,
-                  dst_path='./output',
-                  weights=None,
-                  model=model)
+        results, maps = test.test(cfg,
+                                  'cfg/voc.data',
+                                  batch_size=batch_size,
+                                  img_size=img_size,
+                                  conf_thres=0.05,
+                                  iou_thres=0.5,
+                                  nms_thres=0.5,
+                                  src_txt_path=valid_txt_path,
+                                  dst_path='./output',
+                                  weights=None,
+                                  model=model)
+
+        # Tensorboard
+        tags = ['train/giou_loss', 'train/obj_loss', 'train/cls_loss',
+                'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/F1']
+        for x, tag in zip(list(mloss[:-1]) + list(results), tags):
+            writer.add_scalar(tag, x, epoch)
 
         # save model 保存模型
         chkpt = {'epoch': epoch,
@@ -235,20 +256,24 @@ def train():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/resnet18.cfg', help='xxx.cfg file path')
-    #parser.add_argument('--cfg', type=str, default='cfg/resnet50.cfg', help='xxx.cfg file path')
-    # parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
+    #parser.add_argument('--cfg', type=str, default='cfg/CSPDarknet53-PANet-SPP.cfg', help='xxx.cfg file path')
+    # parser.add_argument('--cfg', type=str, default='cfg/resnet18.cfg', help='xxx.cfg file path')
+    # parser.add_argument('--cfg', type=str, default='cfg/resnet50.cfg', help='xxx.cfg file path')
+    # parser.add_argument('--cfg', type=str, default='cfg/resnet101.cfg', help='xxx.cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
     parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
-    parser.add_argument('--weights', type=str, default='weights/resnet18.pth', help='path to weights file')
-    #parser.add_argument('--weights', type=str, default='weights/resnet50.pth', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/cspdarknet53-panet-spp.weights', help='path to weights file')
+    # parser.add_argument('--weights', type=str, default='weights/resnet18.pth', help='path to weights file')
+    # parser.add_argument('--weights', type=str, default='weights/resnet50.pth', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/resnet101.pth', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
-    # parser.add_argument('--weights', type=str, default='weights/darknet53.conv.74', help='path to weights file')
+    parser.add_argument('--weights', type=str, default='weights/darknet53.conv.74', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--epochs', type=int, default=20)
     #parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--batch-size', type=int, default=64)
     opt = parser.parse_args()
 
     device = select_device(opt.device)

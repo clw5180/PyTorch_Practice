@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 import random
 import torch.nn as nn
+import matplotlib.pyplot as plt
 ####################
 
 def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个list包含3个tensor，维度(1,3,13,13,25), (1,3,26,26,25)....
@@ -39,26 +40,26 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
 
 			#########
             # 1、计算位置损失，这里是GIoU
-            # pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
-            # pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
-            # pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            # lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
-            # tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
+            pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
+            pbox = torch.cat((pxy, pwh), 1)  # predicted box
+            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
+            tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
             #########
 
             #### clw modify  xywh 用 MSE平方差损失
-            # # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
-            # if multi_gpu:
-            #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
-            # else:
-            #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
-            pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和 tw 和 th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
-            txy_gt = tbox[i][:, 0:2]   # bx - cx
-            twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
-            gtbox = torch.cat((txy_gt, twh_gt), 1)
-            lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  if BCE_reduction_type == 'sum' else  ((pbox - gtbox) * (pbox - gtbox)).mean()  # TODO: / stride
-            tobj[b, a, gj, gi] = 1.0
+            # # # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
+            # # if multi_gpu:
+            # #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            # # else:
+            # #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            # pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和 tw 和 th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
+            # txy_gt = tbox[i][:, 0:2]   # bx - cx
+            # twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
+            # gtbox = torch.cat((txy_gt, twh_gt), 1)
+            # lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  if BCE_reduction_type == 'sum' else  ((pbox - gtbox) * (pbox - gtbox)).mean()  # TODO: / stride
+            # tobj[b, a, gj, gi] = 1.0
             ###
 
 
@@ -189,16 +190,17 @@ def select_device(device):  # 暂时不支持 CPU
     os.environ['CUDA_VISIBLE_DEVICES'] = device  # set environment variable
     assert torch.cuda.is_available(), 'CUDA unavailable and CPU not support yet, invalid device: %s' % device  # check availablity
 
-    nums_of_gpu = torch.cuda.device_count()
+    #nums_of_gpu = torch.cuda.device_count()
+    gpu_idxs = [int(str.strip()) for str in device.split(',')]
     #if nums_of_gpu > 1 and batch_size:    # TODO: 多卡，batch_size不能被卡的总数整除 check that batch_size is compatible with device_count
     #    assert batch_size % nums_of_gpu == 0, 'batch-size %g not multiple of GPU count %g' % (batch_size, nums_of_gpu)
-    x = [torch.cuda.get_device_properties(i) for i in range(nums_of_gpu)]
+    x = [torch.cuda.get_device_properties(i) for i in gpu_idxs]
     s = 'Using CUDA '
-    for i in range(0, nums_of_gpu):
-        if i == 1:
+    for i, gpu_idx in enumerate(gpu_idxs):
+        if i == len(gpu_idxs) - 1:
             s = ' ' * len(s)
         print("%sdevice%g _CudaDeviceProperties(name='%s', total_memory=%dMB)" % (s, i, x[i].name, x[i].total_memory / 1024 ** 2))  # bytes to MB
-
+    print('')
 
     '''
     Using CUDA device0 _CudaDeviceProperties(name='GeForce GTX 1080', total_memory=8116MB)
@@ -604,6 +606,8 @@ def load_darknet_weights(self, weights, cutoff=-1):
         cutoff = 74
     elif 'resnet18.pth' in weights:
         cutoff = 31
+    elif 'cspdarknet53-panet-spp' in weights:
+        cutoff = 137
 
     # Read weights file
     with open(weights, 'rb') as f:
@@ -651,3 +655,83 @@ def load_darknet_weights(self, weights, cutoff=-1):
             ptr += num_w
 
     return cutoff
+
+def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16):
+    tl = 3  # line thickness
+    tf = max(tl - 1, 1)  # font thickness
+
+    if isinstance(images, torch.Tensor):
+        images = images.cpu().numpy()
+
+    if isinstance(targets, torch.Tensor):
+        targets = targets.cpu().numpy()
+
+    # un-normalise
+    if np.max(images[0]) <= 1:
+        images *= 255
+
+    bs, _, h, w = images.shape  # batch size, _, height, width
+    bs = min(bs, max_subplots)  # limit plot images
+    ns = np.ceil(bs ** 0.5)  # number of subplots (square)
+
+    # Check if we should resize
+    scale_factor = max_size / max(h, w)
+    if scale_factor < 1:
+        h = math.ceil(scale_factor * h)
+        w = math.ceil(scale_factor * w)
+
+    # Empty array for output
+    mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)
+
+    # Fix class - colour map
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    # https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
+    hex2rgb = lambda h: tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
+    color_lut = [hex2rgb(h) for h in prop_cycle.by_key()['color']]
+
+    for i, img in enumerate(images):
+        if i == max_subplots:  # if last batch has fewer images than we expect
+            break
+
+        block_x = int(w * (i // ns))
+        block_y = int(h * (i % ns))
+
+        img = img.transpose(1, 2, 0)
+        if scale_factor < 1:
+            img = cv2.resize(img, (w, h))
+
+        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
+        if len(targets) > 0:
+            image_targets = targets[targets[:, 0] == i]
+            boxes = xywh2xyxy(image_targets[:, 2:6]).T
+            classes = image_targets[:, 1].astype('int')
+            gt = image_targets.shape[1] == 6  # ground truth if no conf column
+            conf = None if gt else image_targets[:, 6]  # check for confidence presence (gt vs pred)
+
+            boxes[[0, 2]] *= w
+            boxes[[0, 2]] += block_x
+            boxes[[1, 3]] *= h
+            boxes[[1, 3]] += block_y
+            for j, box in enumerate(boxes.T):
+                cls = int(classes[j])
+                color = color_lut[cls % len(color_lut)]
+                cls = names[cls] if names else cls
+                if gt or conf[j] > 0.3:  # 0.3 conf thresh
+                    label = '%s' % cls if gt else '%s %.1f' % (cls, conf[j])
+                    plot_one_box(box, mosaic, label=label, color=color, line_thickness=tl)
+
+        # Draw image filename labels
+        if paths is not None:
+            label = os.path.basename(paths[i])[:40]  # trim to 40 char
+            t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+            cv2.putText(mosaic, label, (block_x + 5, block_y + t_size[1] + 5), 0, tl / 3, [220, 220, 220], thickness=tf,
+                        lineType=cv2.LINE_AA)
+
+        # Image border
+        cv2.rectangle(mosaic, (block_x, block_y), (block_x + w, block_y + h), (255, 255, 255), thickness=3)
+
+    if fname is not None:
+        mosaic = cv2.resize(mosaic, (int(ns * w * 0.5), int(ns * h * 0.5)), interpolation=cv2.INTER_AREA)
+        cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))
+
+    return mosaic

@@ -18,6 +18,7 @@ SAVE = False
 
 def test(cfg,
          data,
+         batch_size,
          img_size,
          conf_thres,
          iou_thres,
@@ -28,7 +29,6 @@ def test(cfg,
          model=None):
 
     # 0、初始化一些参数
-    batch_size = 4
     if not os.path.exists(dst_path):
         os.mkdir(dst_path)
     data = parse_data_cfg(data)
@@ -64,11 +64,12 @@ def test(cfg,
     p, r, f1, mp, mr, map, mf1 = 0., 0., 0., 0., 0., 0., 0.
     jdict, stats, ap, ap_class = [], [], [], []
 
+
     pbar = tqdm(dataloader)
     for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
+        start = time.time()
         img_tensor = img_tensor.to(device)   # (bs, 3, 416, 416)
         target_tensor = target_tensor.to(device)
-        pbar.set_description(s)
 
         # Disable gradients
         with torch.no_grad():
@@ -76,6 +77,9 @@ def test(cfg,
             output = model(img_tensor)[0]   # (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
             # (2) NMS
             nms_output = non_max_suppression(output, conf_thres, nms_thres)
+            s = 'time use per batch: %.3fs' % (time.time() - start)
+
+        pbar.set_description(s)
 
         for batch_idx, pred in enumerate(nms_output):  # detections per image   for *box, conf, _, cls in det: # det: tensor.Size (bs, 7)    box: list
             labels = target_tensor[target_tensor[:, 0] == batch_idx, 1:]
@@ -168,34 +172,38 @@ def test(cfg,
     maps = np.zeros(nc) + map
     for i, c in enumerate(ap_class):
         maps[c] = ap[i]
-    # return (mp, mr, map, mf1, *(loss / len(dataloader)).tolist()), maps
+    return (mp, mr, map, mf1), maps
 
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='xxx.cfg file path')
+    #parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/coco.data', help='xxx.data file path')
+    parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--device', type=str, default='0', help='device id (i.e. 0 or 0,1,2,3) ') # 默认单卡
     parser.add_argument('--src-txt-path', type=str, default='./valid.txt', help='saved img_file_paths list')
     parser.add_argument('--dst-path', type=str, default='./output', help='save detect result in this folder')
     parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/yolov3-spp.pt', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
-    parser.add_argument('--conf-thres', type=float, default=0.1, help='object confidence threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.05, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold for compute mAP')
     parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
 
-    ###parser.add_argument('--batch-size', type=int, default=1)
     opt = parser.parse_args()
     print(opt)
 
     with torch.no_grad():
         test(opt.cfg,
              opt.data,
+             opt.batch_size,
              opt.img_size,
              opt.conf_thres,
              opt.iou_thres,
              opt.nms_thres,
              opt.src_txt_path,
              opt.dst_path,
-             opt.weights)
+             opt.weights
+             )
