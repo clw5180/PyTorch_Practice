@@ -40,26 +40,26 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
 
 			#########
             # 1、计算位置损失，这里是GIoU
-            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
-            pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
-            pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
-            tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+            # pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
+            # pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
+            # pbox = torch.cat((pxy, pwh), 1)  # predicted box
+            # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            # lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
+            # tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
             #########
 
             #### clw modify  xywh 用 MSE平方差损失
-            # # # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
-            # # if multi_gpu:
-            # #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
-            # # else:
-            # #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
-            # pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和 tw 和 th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
-            # txy_gt = tbox[i][:, 0:2]   # bx - cx
-            # twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
-            # gtbox = torch.cat((txy_gt, twh_gt), 1)
-            # lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  if BCE_reduction_type == 'sum' else  ((pbox - gtbox) * (pbox - gtbox)).mean()  # TODO: / stride
-            # tobj[b, a, gj, gi] = 1.0
+            # # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
+            # if multi_gpu:
+            #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            # else:
+            #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和 tw 和 th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
+            txy_gt = tbox[i][:, 0:2]   # bx - cx
+            twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
+            gtbox = torch.cat((txy_gt, twh_gt), 1)
+            lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  if BCE_reduction_type == 'sum' else  ((pbox - gtbox) * (pbox - gtbox)).mean()  # TODO: / stride
+            tobj[b, a, gj, gi] = 1.0
             ###
 
 
@@ -606,8 +606,9 @@ def load_darknet_weights(self, weights, cutoff=-1):
         cutoff = 74
     elif 'resnet18.pth' in weights:
         cutoff = 31
-    elif 'cspdarknet53-panet-spp' in weights:
-        cutoff = 137
+    # elif 'cspdarknet53-panet-spp' in weights:  # clw note：这个 .weight文件是在coco训练的全网络的权重，加载后mAP非常高
+    #     cutoff = 137
+
 
     # Read weights file
     with open(weights, 'rb') as f:

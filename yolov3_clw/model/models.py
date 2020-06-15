@@ -29,7 +29,7 @@ class Darknet(nn.Module):
         # 3、将 module_defs 转化为 module_list，并且找到所有 路由层 的索引，包括 residual模块的 shortcut、
         #    有一个OrderDict类型的变量_module ，比如 key '82' 对应的 value 为 YOLOLayer()对象
         #    这里根据 1 中每个 dict， 创建相应层的对象，放入 nn.ModuleList()类型的 module_list，
-        self.module_list, self.routs = create_modules(self.module_defs, img_size)
+        self.module_list, self.routs = create_modules(self.module_defs)
 
 
 
@@ -72,7 +72,7 @@ class Darknet(nn.Module):
             return torch.cat(io, 1), p
 
 
-def create_modules(module_defs, img_size):
+def create_modules(module_defs):
     # Constructs module list of layer blocks from module configuration in module_defs
 
     hyperparams = module_defs.pop(0)

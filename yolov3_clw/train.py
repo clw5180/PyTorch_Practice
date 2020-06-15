@@ -25,6 +25,7 @@ import test
 import torch.nn as nn
 import torch.distributed as dist  #   clw note: TODO
 from torch.utils.tensorboard import SummaryWriter
+import math
 
 ### 超参数
 lr0 = 1e-3
@@ -119,11 +120,9 @@ def train():
     else:
         raise Exception("pretrained model's path can't be NULL!")
 
-
-
     # 2、设置优化器 和 学习率
     start_epoch = 0
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr0)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr0, momentum=0.9, weight_decay=0.0005)  # TODO：weight_decay=0.0005
     ###### apex need ######
     if mixed_precision:
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
@@ -135,14 +134,17 @@ def train():
                                 rank=0)  # distributed training node rank
         model = torch.nn.parallel.DistributedDataParallel(model, find_unused_parameters=True)  # clw note: 多卡,在 amp.initialize()之后调用分布式代码 DistributedDataParallel否则报错
         model.yolo_layers = model.module.yolo_layers  # move yolo layer indices to top level
+
+
     ######
     model.nc = nc
 
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(total_epochs * x) for x in [0.8, 0.9]], gamma=0.1)
+    #scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(total_epochs * x) for x in [0.8, 0.9]], gamma=0.1)
     ### 余弦学习率
-    #lf = lambda x: (1 + math.cos(x * math.pi / total_epochs)) / 2
-    #scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
-    scheduler.last_epoch = start_epoch - 1
+    lf = lambda x: (1 + math.cos(x * math.pi / total_epochs)) / 2
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+    #scheduler.last_epoch = start_epoch - 1
+    scheduler.last_epoch = 0    # clw note: for pytorch 1.1 and before's version
 
     # 3、加载数据集
     train_dataset = VocDataset(train_txt_path, img_size, with_label=True)
@@ -165,7 +167,7 @@ def train():
         model.train()  # 写在这里，是因为在一个epoch结束后，调用test.test()时，会调用 model.eval()
 
         start = time.time()
-        print(('\n' + '%10s' * 9) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'time_use'))
+        print(('\n' + '%10s' * 8 + '%15s' + '%10s') % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'lr', 'time_use'))
         #pbar = tqdm(dataloader, ncols=20)  # 行数参数ncols=10，这个值可以自己调：尽量大到不能引起上下滚动，同时满足美观的需求。
         #for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
 
@@ -175,6 +177,13 @@ def train():
             img_tensor = img_tensor.to(device)
             target_tensor = target_tensor.to(device)
             ### 训练过程主要包括以下几个步骤：
+
+            # SGD burn-in
+            # ni = epoch * nb + i
+            # if ni <= 1000:  # n_burnin = 1000
+            #     lr = lr0 * (ni / 1000) ** 4
+            #     for g in optimizer.param_groups:
+            #         g['lr'] = lr
 
             # (1) 前传
             pred = model(img_tensor)
@@ -200,8 +209,8 @@ def train():
             # Print batch results
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
             mem = torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0  # (GB)
-            s = ('%10s' * 2 + '%10.3g' * 6 + '%10.3gs') % (
-                '%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size, time.time()-batch_start)
+            s = ('%10s' * 2 + '%10.3g' * 7 + '%10.3gs') % (
+                '%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size,  scheduler.get_lr()[0], time.time()-batch_start)
 
             #pbar.set_description(s)
             ### for debug ###
@@ -261,19 +270,21 @@ if __name__ == '__main__':
     # parser.add_argument('--cfg', type=str, default='cfg/resnet50.cfg', help='xxx.cfg file path')
     # parser.add_argument('--cfg', type=str, default='cfg/resnet101.cfg', help='xxx.cfg file path')
     parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
+    #parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3-spp.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
     parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
     #parser.add_argument('--weights', type=str, default='weights/cspdarknet53-panet-spp.weights', help='path to weights file')
     # parser.add_argument('--weights', type=str, default='weights/resnet18.pth', help='path to weights file')
     # parser.add_argument('--weights', type=str, default='weights/resnet50.pth', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/resnet101.pth', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/yolov3-spp.pt', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--weights', type=str, default='weights/darknet53.conv.74', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--epochs', type=int, default=20)
     #parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--batch-size', type=int, default=16)
     opt = parser.parse_args()
 
     device = select_device(opt.device)

@@ -12,7 +12,7 @@ from utils.parse_config import parse_data_cfg
 from utils.utils import load_classes
 
 train_path = '/home/user/dataset/voc2007/train'
-# train_path = '/home/clwclw/dataset/voc2007/train'
+#train_path = '/home/clwclw/dataset/voc2007/train'
 #train_path = None
 
 valid_path = '/home/user/dataset/voc2007/val'
