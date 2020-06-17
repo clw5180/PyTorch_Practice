@@ -17,8 +17,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 from utils.datasets import VocDataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from utils.utils import compute_loss
-from utils.utils import load_darknet_weights
+from utils.utils import compute_loss, load_darknet_weights, write_to_file
 import os
 import time
 import test
@@ -46,7 +45,7 @@ if mixed_precision:
 
 ### 模型、日志保存路径
 last_model_path = './weights/last.pt'
-
+log_file_name = 'log_{}.txt'.format(time.strftime("%Y%m%d_%H%M%S", time.localtime()))
 ###
 
 def train():
@@ -83,6 +82,10 @@ def train():
         except KeyError as e:
             s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
             raise KeyError(s) from e
+
+        write_to_file(repr(opt), log_file_name, mode='w')
+        write_to_file('anchors:\n' + repr(model.module_defs[model.yolo_layers[0]]['anchors']), log_file_name)
+
     elif weights.endswith('.pth'):    # for 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
         model_state_dict = model.state_dict()
         chkpt = torch.load(weights, map_location=device)
@@ -114,15 +117,21 @@ def train():
         #     s = "%s is not compatible with %s" % (opt.weights, opt.cfg)
         #     raise KeyError(s) from e
 
+        write_to_file(repr(opt), log_file_name, mode='w')
+        write_to_file('anchors:\n' +  repr(model.module_defs[model.yolo_layers[0]]['anchors']), log_file_name)
+
     elif len(weights) > 0:  # darknet format
         # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
         load_darknet_weights(model, weights)
+
+        write_to_file(repr(opt), log_file_name, mode='w')
+        write_to_file('anchors:\n' +  repr(model.module_defs[model.yolo_layers[0]]['anchors']), log_file_name)
     else:
         raise Exception("pretrained model's path can't be NULL!")
 
     # 2、设置优化器 和 学习率
     start_epoch = 0
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr0, momentum=0.9, weight_decay=0.0005)  # TODO：weight_decay=0.0005
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr0, momentum=0.9, weight_decay=0.0005, nesterov=True)  # TODO：nesterov ?  weight_decay=0.0005 ?
     ###### apex need ######
     if mixed_precision:
         model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
@@ -167,7 +176,8 @@ def train():
         model.train()  # 写在这里，是因为在一个epoch结束后，调用test.test()时，会调用 model.eval()
 
         start = time.time()
-        print(('\n' + '%10s' * 10 ) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'lr', 'time_use'))
+        title = ('\n' + '%10s' * 11 ) % ('Epoch', 'Batch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'lr', 'time_use')
+        print(title)
         #pbar = tqdm(dataloader, ncols=20)  # 行数参数ncols=10，这个值可以自己调：尽量大到不能引起上下滚动，同时满足美观的需求。
         #for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
 
@@ -217,7 +227,9 @@ def train():
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
             mem = torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0  # (GB)
             #s = ('%10s' * 2 + '%10.3g' * 7 + '%10.3gs') % ('%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size,  scheduler.get_lr()[0], time.time()-batch_start)
-            s = ('%10s' * 2 + '%10.3g' * 7 + '%10.3gs') % ('%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size,  optimizer.state_dict()['param_groups'][0]['lr'], time.time()-batch_start)
+            s = ('%10s' * 3 + '%10.3g' * 7 + '%10.3gs') % ('%g/%g' % (epoch, total_epochs - 1),
+                                                           '%g/%g' % (i, nb - 1),
+                                                           '%.3gG' % mem, *mloss, len(target_tensor), img_size,  optimizer.state_dict()['param_groups'][0]['lr'], time.time()-batch_start)
 
             #pbar.set_description(s)
             ### for debug ###
@@ -231,10 +243,13 @@ def train():
                 res = plot_images(images=img_tensor, targets=target_tensor, paths=img_path, fname=os.path.join(cur_path, fname))
                 writer.add_image(fname, res, dataformats='HWC', global_step=epoch)
                 # tb_writer.add_graph(model, imgs)  # add model to tensorboard
-                
+
             # end batch ------------------------------------------------------------------------------------------------
 
         print('clw: time use per epoch: %.3fs' % (time.time() - start))
+
+        write_to_file(title, log_file_name)
+        write_to_file(s, log_file_name)
 
         # Update scheduler
         scheduler.step()
@@ -250,7 +265,8 @@ def train():
                                   src_txt_path=valid_txt_path,
                                   dst_path='./output',
                                   weights=None,
-                                  model=model)
+                                  model=model,
+                                  log_file_name = log_file_name)
 
         # Tensorboard
         tags = ['train/giou_loss', 'train/obj_loss', 'train/cls_loss',
@@ -276,8 +292,8 @@ if __name__ == '__main__':
     # parser.add_argument('--cfg', type=str, default='cfg/resnet18.cfg', help='xxx.cfg file path')
     # parser.add_argument('--cfg', type=str, default='cfg/resnet50.cfg', help='xxx.cfg file path')
     # parser.add_argument('--cfg', type=str, default='cfg/resnet101.cfg', help='xxx.cfg file path')
-    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3-spp.cfg', help='xxx.cfg file path')
     #parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3-spp.cfg', help='xxx.cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
     parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
     #parser.add_argument('--weights', type=str, default='weights/cspdarknet53-panet-spp.weights', help='path to weights file')
@@ -289,9 +305,9 @@ if __name__ == '__main__':
     #parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--weights', type=str, default='weights/darknet53.conv.74', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
-    parser.add_argument('--epochs', type=int, default=40)
-    #parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    parser.add_argument('--batch-size', type=int, default=16)
+    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    #parser.add_argument('--batch-size', type=int, default=16)
     opt = parser.parse_args()
 
     device = select_device(opt.device)

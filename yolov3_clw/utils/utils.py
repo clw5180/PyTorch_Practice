@@ -828,3 +828,8 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         cv2.imwrite(fname, cv2.cvtColor(mosaic, cv2.COLOR_BGR2RGB))
 
     return mosaic
+
+
+def write_to_file(text, file='log.txt', mode='a'):
+    with open(file, mode) as f:
+        f.write(text + '\n')

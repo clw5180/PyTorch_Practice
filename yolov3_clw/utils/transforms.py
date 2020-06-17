@@ -55,7 +55,7 @@ class ToTensor(object):
             img /= 255.0
             #img = img.transpose(2, 0, 1)    # clw note：img[:, :, ::-1]很有必要 ，否则会产生大量漏检！事实证明使用官方模型detect，如果用rgb翻转后的图片，很多东西就检不出来了！
             img = img[:, :, ::-1].transpose(2, 0, 1)   # clw note: BGR to RGB, [h,w,c] to [c,h,w]
-            img = img.astype(np.float32)
+            img = np.ascontiguousarray(img)  # TODO: 这句话不加会掉点？？？
             return torch.from_numpy(img)
 
         else:  # 既有img，又有label
@@ -63,9 +63,9 @@ class ToTensor(object):
             img = img.astype(np.float32)
             img /= 255.0
             img = img[:, :, ::-1].transpose(2, 0, 1)
-            img = img.astype(np.float32)
 
             #return (torch.from_numpy(image),  torch.from_numpy(label))
+            img = np.ascontiguousarray(img)
             return (torch.from_numpy(img), label)
 
 

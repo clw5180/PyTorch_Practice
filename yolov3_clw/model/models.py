@@ -32,7 +32,7 @@ class Darknet(nn.Module):
         # 3、这里存的只是三个 yolo_layer 的索引，
         #    通过遍历 module_defs 很容易得到，即 [82, 94, 106]
         self.yolo_layers = get_yolo_layers(self)
-        print('yolo_layers index:', self.yolo_layers)
+        # print('yolo_layers index:', self.yolo_layers)
 
 
 

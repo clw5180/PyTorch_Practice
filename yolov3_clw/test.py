@@ -1,7 +1,7 @@
 from utils.utils import select_device
 from model.models import Darknet
 from utils.datasets import VocDataset
-from utils.utils import non_max_suppression, load_classes, ap_per_class, xywh2xyxy, bbox_iou
+from utils.utils import non_max_suppression, load_classes, ap_per_class, xywh2xyxy, bbox_iou, write_to_file
 from utils.parse_config import parse_data_cfg
 
 import argparse
@@ -26,7 +26,8 @@ def test(cfg,
          src_txt_path='./valid.txt',
          dst_path='./output',
          weights=None,
-         model=None):
+         model=None,
+         log_file_name='log.txt'):
 
     # 0、初始化一些参数
     if not os.path.exists(dst_path):
@@ -54,7 +55,7 @@ def test(cfg,
                             shuffle=False,
                             num_workers=4,    # TODO
                             collate_fn=valid_dataset.train_collate_fn,   # TODO
-                            pin_memory=True)  # TODO：貌似很重要，否则容易炸显存
+                            pin_memory=True)
 
     # 3、预测，前向传播
     image_nums = 0
@@ -154,8 +155,12 @@ def test(cfg,
     # Print results
     time.sleep(0.01)  # clw note: 防止前面 tqdm 还没输出，但是这里已经打印了
     #pf = '%20s' + '%10.3g' * 6  # print format
-    pf = '%20s' + '%10s' + '%10.3g' * 5  # print format
-    print(pf % ('all', str(image_nums), nt.sum(), mp, mr, map, mf1))
+    pf = '%20s' + '%10s' + '%10.3g' * 5
+    pf_value = pf % ('all', str(image_nums), nt.sum(), mp, mr, map, mf1)
+    print(pf_value)
+    if __name__ != '__main__':
+        write_to_file(s, log_file_name)
+        write_to_file(pf_value, log_file_name)
 
     results = []
     results.append( { "all" : (mp, mr, map, mf1) } )
@@ -166,6 +171,8 @@ def test(cfg,
         for i, c in enumerate(ap_class):
             #print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
             print(pf % (names[c], '', nt[c], p[i], r[i], ap[i], f1[i]))
+            if __name__ != '__main__':
+                write_to_file(pf % (names[c], '', nt[c], p[i], r[i], ap[i], f1[i]), log_file_name)
             results.append( { names[c] : (p[i], r[i], ap[i], f1[i]) } )
 
     # Return results
