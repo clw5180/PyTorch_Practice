@@ -20,16 +20,21 @@ class Darknet(nn.Module):
         #        [156., 198.],
         #        [373., 326.]]), 'classes': '80', 'num': '9', 'jitter': '.3', 'ignore_thresh': '.7', 'truth_thresh': '1', 'random': '1'}
         #    内容上和 .cfg 文件本身完全一样
-        self.module_defs = parse_model_cfg(cfg)
+        self.module_defs = parse_model_cfg(cfg)   # 注意这里除了包含索引 0-106 的所有层之外，还包含了[net]的信息，比如输入通道数channels=3，
+                                                  # 这个在下一步 create_modules() 搭建conv层时会用到，所以还不能删；等进入 create_modules() 后，
+                                                  # 才可以 module_defs.pop(0)；另外 get_yolo_layers() 也因此放在再下一步，也就是第三步，注意顺序不能颠倒
 
-        # 2、这里存的只是三个 yolo_layer 的索引，
-        #    通过遍历 module_defs 很容易得到，即 [82, 94, 106]
-        self.yolo_layers = get_yolo_layers(self)
-
-        # 3、将 module_defs 转化为 module_list，并且找到所有 路由层 的索引，包括 residual模块的 shortcut、
+        # 2、将 module_defs 转化为 module_list，并且找到所有 路由层 的索引，包括 residual模块的 shortcut、
         #    有一个OrderDict类型的变量_module ，比如 key '82' 对应的 value 为 YOLOLayer()对象
         #    这里根据 1 中每个 dict， 创建相应层的对象，放入 nn.ModuleList()类型的 module_list，
         self.module_list, self.routs = create_modules(self.module_defs)
+
+        # 3、这里存的只是三个 yolo_layer 的索引，
+        #    通过遍历 module_defs 很容易得到，即 [82, 94, 106]
+        self.yolo_layers = get_yolo_layers(self)
+        print('yolo_layers index:', self.yolo_layers)
+
+
 
 
 
@@ -82,7 +87,7 @@ def create_modules(module_defs):
 
     for i, mdef in enumerate(module_defs):
         modules = nn.Sequential()
-
+        #print(i, mdef['type'])
         if mdef['type'] == 'convolutional':
             bn = int(mdef['batch_normalize'])
             filters = int(mdef['filters'])
@@ -222,8 +227,8 @@ class YOLOLayer(nn.Module):
 
 
 def get_yolo_layers(model):
-    #return [i for i, x in enumerate(model.module_defs) if x['type'] == 'yolo']  # [82, 94, 106] for yolov3
-    return [i-1 for i, x in enumerate(model.module_defs) if x['type'] == 'yolo'] # TODO: 因为cfg多了个[net]，所以相当于平白无故多加了一层
+    return [i for i, x in enumerate(model.module_defs) if x['type'] == 'yolo']  # [82, 94, 106] for classic yolov3
+
 
 def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float32):
     nx, ny = ng  # x and y grid size

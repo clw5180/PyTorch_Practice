@@ -167,24 +167,31 @@ def train():
         model.train()  # 写在这里，是因为在一个epoch结束后，调用test.test()时，会调用 model.eval()
 
         start = time.time()
-        print(('\n' + '%10s' * 8 + '%15s' + '%10s') % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'lr', 'time_use'))
+        print(('\n' + '%10s' * 10 ) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size', 'lr', 'time_use'))
         #pbar = tqdm(dataloader, ncols=20)  # 行数参数ncols=10，这个值可以自己调：尽量大到不能引起上下滚动，同时满足美观的需求。
         #for i, (img_tensor, target_tensor, img_path, _) in enumerate(pbar):
 
+        # # Freeze darknet53.conv.74 for first epoch
+        # freeze_backbone = False
+        # if freeze_backbone and (epoch < 3):
+        #     for i, (name, p) in enumerate(model.named_parameters()):
+        #         if int(name.split('.')[2]) < 75:  # if layer < 75  # 多卡是[2]，单卡[1]
+        #             p.requires_grad = False if (epoch < 3) else True
+
         for i, (img_tensor, target_tensor, img_path, _) in enumerate(dataloader):
+
+            # # SGD burn-in
+            # ni = epoch * nb + i
+            # if ni <= 1000:  # n_burnin = 1000
+            #     lr = lr0 * (ni / 1000) ** 2
+            #     for g in optimizer.param_groups:
+            #         g['lr'] = lr
+
             batch_start = time.time()
             #print(img_path)
             img_tensor = img_tensor.to(device)
             target_tensor = target_tensor.to(device)
             ### 训练过程主要包括以下几个步骤：
-
-            # SGD burn-in
-            # ni = epoch * nb + i
-            # if ni <= 1000:  # n_burnin = 1000
-            #     lr = lr0 * (ni / 1000) ** 4
-            #     for g in optimizer.param_groups:
-            #         g['lr'] = lr
-
             # (1) 前传
             pred = model(img_tensor)
 
@@ -209,8 +216,8 @@ def train():
             # Print batch results
             mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
             mem = torch.cuda.memory_cached() / 1E9 if torch.cuda.is_available() else 0  # (GB)
-            s = ('%10s' * 2 + '%10.3g' * 7 + '%10.3gs') % (
-                '%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size,  scheduler.get_lr()[0], time.time()-batch_start)
+            #s = ('%10s' * 2 + '%10.3g' * 7 + '%10.3gs') % ('%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size,  scheduler.get_lr()[0], time.time()-batch_start)
+            s = ('%10s' * 2 + '%10.3g' * 7 + '%10.3gs') % ('%g/%g' % (epoch, total_epochs - 1), '%.3gG' % mem, *mloss, len(target_tensor), img_size,  optimizer.state_dict()['param_groups'][0]['lr'], time.time()-batch_start)
 
             #pbar.set_description(s)
             ### for debug ###
@@ -269,7 +276,7 @@ if __name__ == '__main__':
     # parser.add_argument('--cfg', type=str, default='cfg/resnet18.cfg', help='xxx.cfg file path')
     # parser.add_argument('--cfg', type=str, default='cfg/resnet50.cfg', help='xxx.cfg file path')
     # parser.add_argument('--cfg', type=str, default='cfg/resnet101.cfg', help='xxx.cfg file path')
-    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3-spp.cfg', help='xxx.cfg file path')
     #parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3-spp.cfg', help='xxx.cfg file path')
     parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
     parser.add_argument('--device', default='0,1', help='device id (i.e. 0 or 0,1,2,3)') # 默认单卡
@@ -282,7 +289,7 @@ if __name__ == '__main__':
     #parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
     parser.add_argument('--weights', type=str, default='weights/darknet53.conv.74', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=40)
     #parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--batch-size', type=int, default=16)
     opt = parser.parse_args()
