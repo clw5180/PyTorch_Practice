@@ -12,8 +12,8 @@ import os
 from tqdm import tqdm
 import time
 
-SHOW = True
-SAVE = False
+SHOW = False
+SAVE = True
 
 def detect():
     # 0、初始化一些参数
@@ -39,7 +39,7 @@ def detect():
     dataloader = DataLoader(test_dataset,
                             batch_size=batch_size,
                             shuffle=False,
-                            num_workers=0,    # TODO
+                            num_workers=8,    # TODO
                             collate_fn=test_dataset.test_collate_fn)   # TODO
 
     # 3、预测，前向传播
@@ -86,16 +86,17 @@ def detect():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='xxx.cfg file path')
-    parser.add_argument('--data', type=str, default='cfg/coco.data', help='xxx.data file path')
-    parser.add_argument('--device', type=str, default='0', help='device id (i.e. 0 or 0,1,2,3) ') # 默认单卡
+    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
+    parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
+    parser.add_argument('--device', type=str, default='0,1', help='device id (i.e. 0 or 0,1,2,3) ') # 默认单卡
     parser.add_argument('--src-txt-path', type=str, default='./valid.txt', help='saved img_file_paths list')
     parser.add_argument('--dst-path', type=str, default='./output', help='save detect result in this folder')
-    parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
+    #parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
+    parser.add_argument('--weights', type=str, default='weights/last.pt', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
-    parser.add_argument('--conf-thres', type=float, default=0.1, help='object confidence threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression, do not be confused with the iou threshold for mAP')
-    parser.add_argument('--batch-size', type=int, default=4)
+    parser.add_argument('--batch-size', type=int, default=8)
     opt = parser.parse_args()
     print(opt)
 

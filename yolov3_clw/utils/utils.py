@@ -7,8 +7,10 @@ import cv2
 import random
 import torch.nn as nn
 import matplotlib.pyplot as plt
+
 ####################
 
+### new version
 def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个list包含3个tensor，维度(1,3,13,13,25), (1,3,26,26,25)....
     #ft = torch.cuda.FloatTensor if p[0].is_cuda else torch.Tensor  # clw note: 暂时不支持cpu，太慢
 
@@ -39,28 +41,27 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
 
 			#########
             # 1、计算位置损失，这里是GIoU
-            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
-            pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
-            pbox = torch.cat((pxy, pwh), 1)  # predicted box
-            giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
-            tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
+            # pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
+            # pwh = torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]  # 根据 tx，ty，tw，th 求出 实际框相对于当前grid的偏移，以及wh的比例系数
+            # pbox = torch.cat((pxy, pwh), 1)  # predicted box
+            # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
+            # lbox += (1.0 - giou).sum() if BCE_reduction_type == 'sum' else (1.0 - giou).mean()  # giou loss
+            # tobj[b, a, gj, gi] = giou.detach().clamp(0).type(tobj.dtype) if giou_flag else 1.0
             #########
 
-
-
-
-            '''  # old version
-            # GIoU
-			tobj[b, a, gj, gi] = 1.0  # obj
-            pxy = torch.sigmoid(ps[:, 0:2])  # pxy = pxy * s - (s - 1) / 2,  s = 1.5  (scale_xy)
-            #pbox = torch.cat((pxy, torch.exp(ps[:, 2:4]).clamp(max=1E4) * anchor_vec[i]), 1)  # predicted box
-            pbox = torch.cat((pxy, torch.exp(ps[:, 2:4]).clamp(max=1E3) * anchor_vec[i]), 1)  # predicted box
-            # giou = bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            # lbox += (1.0 - giou).mean()  # giou loss
-            giou = 1.0 - bbox_iou(pbox.t(), tbox[i], x1y1x2y2=False, GIoU=True)  # giou computation
-            lbox += giou.sum() if BCE_reduction_type == 'sum' else giou.mean()  # giou loss
-			'''
+            #### clw modify  xywh 用 MSE平方差损失
+            # # multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
+            # if multi_gpu:
+            #     nums_of_grid = model.module.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            # else:
+            #     nums_of_grid = model.module_list[model.yolo_layers[i]].ng  # [13, 13]
+            pbox = torch.cat((torch.sigmoid(ps[:, 0:2]), ps[:, 2:4]), 1)  # clw note：用于计算损失的是σ(tx),σ(ty),和 tw 和 th (因为gt映射到tx^时，sigmoid反函数不好求，所以不用tx和ty)
+            txy_gt = tbox[i][:, 0:2]   # bx - cx
+            twh_gt = torch.log(tbox[i][:, 2:4] / anchor_vec[i])
+            gtbox = torch.cat((txy_gt, twh_gt), 1)
+            lbox += torch.sum( (pbox - gtbox) * (pbox - gtbox) )  if BCE_reduction_type == 'sum' else  ((pbox - gtbox) * (pbox - gtbox)).mean()  # TODO: / stride
+            tobj[b, a, gj, gi] = 1.0
+            ###
 
             # 2、计算分类损失，这里只针对多类别，如果只有1个类那么只需要计算 obj 损失
             if model.nc > 1:  # cls loss (only if multiple classes)
@@ -98,6 +99,7 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
 
     loss = lbox + lobj + lcls
     return loss, torch.cat((lbox, lobj, lcls, loss)).detach()
+###
 
 
 # def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个list包含3个tensor，维度(1,3,13,13,25), (1,3,26,26,25)....
@@ -203,26 +205,32 @@ def compute_loss(p, targets, model, giou_flag=True):  # p:predictions，一个li
 
 
 
-def build_targets(model, targets):
-    # targets = [image, class, x, y, w, h]
-
-    nt = len(targets)   # targets 维度 (n, 6)  nt: number of target
+def build_targets(model, targets):  # targets: (n, 6)， 每一行形如 [image_idx, class, x, y, w, h]
+    nt = len(targets)   #  nt: number of target
     tcls, tbox, indices, av = [], [], [], []
     multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)  # clw note: 多卡
     reject, use_all_anchors = True, True
-    for i in model.yolo_layers:
+    for i in model.yolo_layers:  # clw note: 遍历3个yolo层
         # get number of grid points and anchor vec for this yolo layer
         if multi_gpu:
             ng, anchor_vec = model.module.module_list[i].ng, model.module.module_list[i].anchor_vec
         else:
-            ng, anchor_vec = model.module_list[i].ng, model.module_list[i].anchor_vec  # ng:[13, 13]  anchor tensor([[ 3.6250,  2.8125],[ 4.8750,  6.1875], [11.6562, 10.1875]]
-                                                                                       # anchor 在yololayer forward创建， /stride,  116/32=3.625, 90/32=2.8125...
+            ng, anchor_vec = model.module_list[i].ng, model.module_list[i].anchor_vec
+            # ng=[13, 13]  anchor_vec=([[ 3.6250,  2.8125],[ 4.8750,  6.1875], [11.6562, 10.1875]]
+            # anchor 在yololayer forward创建， 是除以stride之后的值, 如 116/32=3.625, 90/32=2.8125...
+
         # iou of targets-anchors
         t, a = targets, []
         gwh = t[:, 4:6] * ng  # gt换算到三个feature map的 wh
-        if nt:
-            iou = torch.stack([wh_iou(x, gwh) for x in anchor_vec], 0)  # 假设了 anchor 在 gt内部？ TODO
 
+        #############################
+        gxy_clw = t[:, 2:4] * ng  # grid x, y
+        gxywh = torch.cat((gxy_clw, gwh), 1)
+        if nt:
+            #iou = torch.stack([wh_iou(x, gwh) for x in anchor_vec], 0)  # 假设了 anchor 在 gt内部？这里wh_iou貌似是为了简化计算 TODO
+
+            iou = torch.stack([bboxes_anchor_iou(gxywh, anchor, x1y1x2y2=False) for anchor in anchor_vec], 0)         # clw modify
+            #################################
 
             if use_all_anchors:
                 na = len(anchor_vec)  # number of anchors
@@ -235,6 +243,7 @@ def build_targets(model, targets):
 
             if reject:  # reject anchors below iou_thres (OPTIONAL, increases P, lowers R)
                 j = iou.view(-1) > 0.2  # model.hyp['iou_t']  # iou threshold hyperparameter
+                #j = iou.view(-1) > 0.113  # TODO !!
                 #j = iou > model.hyp['iou_t']  # iou threshold hyperparameter
                 t, a, gwh = t[j], a[j], gwh[j]
 
@@ -242,11 +251,11 @@ def build_targets(model, targets):
         b, c = t[:, :2].long().t()  # target image idx, class
         gxy = t[:, 2:4] * ng  # grid x, y
         gi, gj = gxy.long().t()  # grid x, y indices
-        indices.append((b, a, gj, gi))  # target image idx, anchor idx, gt的x_ctr和y_ctr所在cell左上角坐标，整数
+        indices.append((b, a, gj, gi))  # 加入的4个元素是：image_idx(0~batchsize), anchor_idx(0~2), gt的x_ctr和y_ctr所在cell左上角坐标(范围依次是0~12, 0~25, 0~51)，整数
 
         # GIoU
         gxy -= gxy.floor()  # gt的x_ctr和y_ctr所在cell 偏移量   # TODO !!!
-        tbox.append(torch.cat((gxy, gwh), 1))  # xywh (grids)
+        tbox.append(torch.cat((gxy, gwh), 1))  # xywh (grids)， concat后变成 (n, 2+2)
         av.append(anchor_vec[a])  # anchor vec，就是iou超过threshold的 anchor index
 
         # Class
@@ -254,38 +263,35 @@ def build_targets(model, targets):
         if c.shape[0]:  # if any targets
             assert c.max() < model.nc, 'Target class_idx exceed total model classes'
 
-    return tcls, tbox, indices, av  # t表示target，也就是gt，tbox: (n, 4) n代表iou超过threshold的 anchor个数，
+    return tcls, tbox, indices, av  # t前缀表示target，也就是gt，tbox: (n, 4) 其中 n 代表iou超过threshold的 anchor个数，
                                     # 比如n=2且只有1个target，那么2行的内容都是一样的，意思是该层yolo_layer有2个anchor命中该target
-                                    # tbox列的4个值xywh，xy是当前grid cell内的坐标，wh是gt映射到当前feature map的wh
 
-def wh_iou(box1, box2):
-    # Returns the IoU of wh1 to wh2. wh1 is 2, wh2 is nx2
-    box2 = box2.t()
+                                    # tcls是一个list，[0][1][2]分别为3个层对应的3个tensor，每个tensor:(n)，记录了每个 gt 对应的 cls
+                                    # indices是一个list，[0][1][2]分别为3个层对应的3个tuple，每个tuple包含4个tensor，每个tensor:(n)，记录了 image_idx(0~batchsize), anchor_idx(0~2), gt的x_ctr和y_ctr所在cell左上角坐标(范围依次是0~12, 0~25, 0~51)，整数
+                                    # tbox是一个list，[0][1][2]分别为3个层对应的3个tensor, 每个tensor:(n, 4)，其中4个值为xywh，xy是当前grid cell内的坐标，wh是gt映射到当前feature map的wh
+                                    # av也是一个list，[0][1][2]分别为3个层对应的3个tensor，每个tensor:(n, 2)，如 [3.625, 2.8125]，记录了每一层和每个gt 匹配的 anchor的w和h
 
-    # w, h = box1
-    w1, h1 = box1[0], box1[1]
-    w2, h2 = box2[0], box2[1]
 
-    # Intersection area
-    inter_area = torch.min(w1, w2) * torch.min(h1, h2)
 
-    # Union Area
-    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
-
-    return inter_area / union_area  # iou
 
 ######################################################################
 
 
 
 def select_device(device):  # 暂时不支持 CPU
+    assert torch.cuda.is_available(), 'CUDA unavailable and CPU not support yet, invalid device: %s' % device
+    if device == '':
+        ng = torch.cuda.device_count()
+        device = '0'
+        for i in range(1, ng):
+            device += ',' + str(i)
     os.environ['CUDA_VISIBLE_DEVICES'] = device  # set environment variable
-    assert torch.cuda.is_available(), 'CUDA unavailable and CPU not support yet, invalid device: %s' % device  # check availablity
 
     #nums_of_gpu = torch.cuda.device_count()
-    gpu_idxs = [int(str.strip()) for str in device.split(',')]
     #if nums_of_gpu > 1 and batch_size:    # TODO: 多卡，batch_size不能被卡的总数整除 check that batch_size is compatible with device_count
     #    assert batch_size % nums_of_gpu == 0, 'batch-size %g not multiple of GPU count %g' % (batch_size, nums_of_gpu)
+
+    gpu_idxs = [int(str.strip()) for str in device.split(',')]
     x = [torch.cuda.get_device_properties(i) for i in gpu_idxs]
     s = 'Using CUDA '
     for i, gpu_idx in enumerate(gpu_idxs):
@@ -321,7 +327,25 @@ def xywh2xyxy(x):
     y[:, 3] = x[:, 1] + x[:, 3] / 2
     return y
 
+#  clw note: 一个框和多个框算iou
+def wh_iou(box1, box2):
+    # Returns the IoU of wh1 to wh2. wh1 is 2, wh2 is nx2
+    box2 = box2.t()
 
+    # w, h = box1
+    w1, h1 = box1[0], box1[1]
+    w2, h2 = box2[0], box2[1]
+
+    # Intersection area
+    inter_area = torch.min(w1, w2) * torch.min(h1, h2)
+
+    # Union Area
+    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
+
+    return inter_area / union_area  # iou
+
+
+#  clw note: 一个框和多个框算iou
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
     box2 = box2.t()
@@ -364,6 +388,88 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False):
                 with torch.no_grad():
                     alpha = v / (1 - iou + v)
                 return iou - (rho2 / c2 + v * alpha)  # CIoU
+
+    return iou
+
+'''
+### 多个框和多个框算iou
+def bbox_iou(box1, box2, x1y1x2y2=True):
+    """
+    Returns the IoU of two bounding boxes
+    """
+    if not x1y1x2y2:
+        # Transform from center and width to exact coordinates
+        b1_x1, b1_x2 = box1[:, 0] - box1[:, 2] / 2, box1[:, 0] + box1[:, 2] / 2
+        b1_y1, b1_y2 = box1[:, 1] - box1[:, 3] / 2, box1[:, 1] + box1[:, 3] / 2
+        b2_x1, b2_x2 = box2[:, 0] - box2[:, 2] / 2, box2[:, 0] + box2[:, 2] / 2
+        b2_y1, b2_y2 = box2[:, 1] - box2[:, 3] / 2, box2[:, 1] + box2[:, 3] / 2
+    else:
+        # Get the coordinates of bounding boxes
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]
+
+    # get the corrdinates of the intersection rectangle
+    inter_rect_x1 = torch.max(b1_x1, b2_x1)
+    inter_rect_y1 = torch.max(b1_y1, b2_y1)
+    inter_rect_x2 = torch.min(b1_x2, b2_x2)
+    inter_rect_y2 = torch.min(b1_y2, b2_y2)
+    # Intersection area
+    inter_area = torch.clamp(inter_rect_x2 - inter_rect_x1 + 1, min=0) * torch.clamp(
+        inter_rect_y2 - inter_rect_y1 + 1, min=0
+    )
+    # Union Area
+    b1_area = (b1_x2 - b1_x1 + 1) * (b1_y2 - b1_y1 + 1)
+    b2_area = (b2_x2 - b2_x1 + 1) * (b2_y2 - b2_y1 + 1)
+
+    iou = inter_area / (b1_area + b2_area - inter_area + 1e-16)
+
+    return iou
+
+Traceback (most recent call last):
+  File "train.py", line 363, in <module>
+    log_file_path = log_file_path)
+  File "/home/user/yolov3_clw/test.py", line 80, in test
+    nms_output = non_max_suppression(output, conf_thres, nms_thres)
+  File "/home/user/yolov3_clw/utils/utils.py", line 584, in non_max_suppression
+    i = bbox_iou(dc[0], dc) > nms_thres  # iou with other boxes
+  File "/home/user/yolov3_clw/utils/utils.py", line 406, in bbox_iou
+    b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]
+IndexError: too many indices for tensor of dimension 1
+'''
+
+def bboxes_anchor_iou(box1, anchors_wh, x1y1x2y2=True):
+    anchor_xy = box1[:, :2].floor() + 0.5  # (14, 2)
+
+    # Returns the IoU of box1 to anchors_wh.
+    anchors_wh = anchors_wh  # (1,2)
+    anchors_wh = anchors_wh.repeat(box1.shape[0], 1)
+    anchors_xywh = torch.cat((anchor_xy, anchors_wh), 1)
+
+    if not x1y1x2y2:
+        # Transform from center and width to exact coordinates
+        b1_x1, b1_x2 = box1[:, 0] - box1[:, 2] / 2, box1[:, 0] + box1[:, 2] / 2
+        b1_y1, b1_y2 = box1[:, 1] - box1[:, 3] / 2, box1[:, 1] + box1[:, 3] / 2
+        b2_x1, b2_x2 = anchors_xywh[:, 0] - anchors_xywh[:, 2] / 2, anchors_xywh[:, 0] + anchors_xywh[:, 2] / 2
+        b2_y1, b2_y2 = anchors_xywh[:, 1] - anchors_xywh[:, 3] / 2, anchors_xywh[:, 1] + anchors_xywh[:, 3] / 2
+    else:
+        # Get the coordinates of bounding boxes
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]
+        b2_x1, b2_y1, b2_x2, b2_y2 = anchors_xywh[:, 0], anchors_xywh[:, 1], anchors_xywh[:, 2], anchors_xywh[:, 3]
+
+    # get the corrdinates of the intersection rectangle
+    inter_rect_x1 = torch.max(b1_x1, b2_x1)
+    inter_rect_y1 = torch.max(b1_y1, b2_y1)
+    inter_rect_x2 = torch.min(b1_x2, b2_x2)
+    inter_rect_y2 = torch.min(b1_y2, b2_y2)
+    # Intersection area
+    inter_area = torch.clamp(inter_rect_x2 - inter_rect_x1 + 1, min=0) * torch.clamp(
+        inter_rect_y2 - inter_rect_y1 + 1, min=0
+    )
+    # Union Area
+    b1_area = (b1_x2 - b1_x1 + 1) * (b1_y2 - b1_y1 + 1)
+    b2_area = (b2_x2 - b2_x1 + 1) * (b2_y2 - b2_y1 + 1)
+
+    iou = inter_area / (b1_area + b2_area - inter_area + 1e-16)
 
     return iou
 
@@ -639,52 +745,6 @@ def compute_ap(recall, precision):
 
     return ap
 
-def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False):
-    # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
-    box2 = box2.t()
-
-    # Get the coordinates of bounding boxes
-    if x1y1x2y2:  # x1, y1, x2, y2 = box1
-        b1_x1, b1_y1, b1_x2, b1_y2 = box1[0], box1[1], box1[2], box1[3]
-        b2_x1, b2_y1, b2_x2, b2_y2 = box2[0], box2[1], box2[2], box2[3]
-    else:  # x, y, w, h = box1
-        b1_x1, b1_x2 = box1[0] - box1[2] / 2, box1[0] + box1[2] / 2
-        b1_y1, b1_y2 = box1[1] - box1[3] / 2, box1[1] + box1[3] / 2
-        b2_x1, b2_x2 = box2[0] - box2[2] / 2, box2[0] + box2[2] / 2
-        b2_y1, b2_y2 = box2[1] - box2[3] / 2, box2[1] + box2[3] / 2
-
-    # Intersection area
-    inter_area = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
-                 (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
-
-    # Union Area
-    w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1
-    w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1
-    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
-
-    iou = inter_area / union_area  # iou
-    if GIoU or DIoU or CIoU:
-        cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
-        ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
-        if GIoU:  # Generalized IoU https://arxiv.org/pdf/1902.09630.pdf
-            c_area = cw * ch + 1e-16  # convex area
-            return iou - (c_area - union_area) / c_area  # GIoU
-        if DIoU or CIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
-            # convex diagonal squared
-            c2 = cw ** 2 + ch ** 2 + 1e-16
-            # centerpoint distance squared
-            rho2 = ((b2_x1 + b2_x2) - (b1_x1 + b1_x2)) ** 2 / 4 + ((b2_y1 + b2_y2) - (b1_y1 + b1_y2)) ** 2 / 4
-            if DIoU:
-                return iou - rho2 / c2  # DIoU
-            elif CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
-                v = (4 / math.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
-                with torch.no_grad():
-                    alpha = v / (1 - iou + v)
-                return iou - (rho2 / c2 + v * alpha)  # CIoU
-
-    return iou
-
-
 
 def load_darknet_weights(self, weights, cutoff=-1):
     # Parses and loads the weights stored in 'weights'
@@ -700,7 +760,6 @@ def load_darknet_weights(self, weights, cutoff=-1):
         cutoff = 31
     # elif 'cspdarknet53-panet-spp' in weights:  # clw note：这个 .weight文件是在coco训练的全网络的权重，加载后mAP非常高
     #     cutoff = 137
-
 
     # Read weights file
     with open(weights, 'rb') as f:
@@ -743,7 +802,7 @@ def load_darknet_weights(self, weights, cutoff=-1):
             # Load conv. weights
             num_w = conv_layer.weight.numel()
             conv_w = torch.from_numpy(weights[ptr:ptr + num_w]).view_as(conv_layer.weight)
-            # print(i, weights[ptr])  # clw add: for debug
+            #print(i, weights[ptr])  # clw add: for debug
             conv_layer.weight.data.copy_(conv_w)
             ptr += num_w
 
@@ -833,3 +892,27 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
 def write_to_file(text, file='log.txt', mode='a'):
     with open(file, mode) as f:
         f.write(text + '\n')
+
+
+def print_model_biases(model):
+    # prints the bias neurons preceding each yolo layer
+    print('\nModel Bias Summary (per output layer):')
+    multi_gpu = type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel)
+    for l in model.yolo_layers:  # print pretrained biases
+        if multi_gpu:
+            na = model.module.module_list[l].na  # number of anchors
+            b = model.module.module_list[l - 1][0].bias.view(na, -1)  # bias 3x85
+        else:
+            na = model.module_list[l].na
+            b = model.module_list[l - 1][0].bias.view(na, -1)  # bias 3x85
+        print('regression: %5.2f+/-%-5.2f ' % (b[:, :4].mean(), b[:, :4].std()),
+              'objectness: %5.2f+/-%-5.2f ' % (b[:, 4].mean(), b[:, 4].std()),
+              'classification: %5.2f+/-%-5.2f' % (b[:, 5:].mean(), b[:, 5:].std()))
+
+def weights_init_normal(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        torch.nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("BatchNorm2d") != -1:
+        torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
+        torch.nn.init.constant_(m.bias.data, 0.0)

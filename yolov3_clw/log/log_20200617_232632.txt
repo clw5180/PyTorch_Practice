@@ -1,0 +1,11 @@
+Namespace(batch_size=2, cfg='cfg/voc_yolov3.cfg', data='cfg/voc.data', device='0', epochs=20, img_size=416, weights='weights/darknet53.conv.74')
+anchors:
+array([[ 10.,  13.],
+       [ 16.,  30.],
+       [ 33.,  23.],
+       [ 30.,  61.],
+       [ 62.,  45.],
+       [ 59., 119.],
+       [116.,  90.],
+       [156., 198.],
+       [373., 326.]])

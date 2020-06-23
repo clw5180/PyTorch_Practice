@@ -151,7 +151,7 @@ def create_modules(module_defs):
             try:
                 # elif arc == 'default':  # default no pw (40 cls, 80 obj)
                     #b = [-5.5, -4.0]
-                b = [-5.0, -5.0]
+                b = [-5.0, -5.0]  # TODO
 
                 bias = module_list[-1][0].bias.view(len(mask), -1)  # 255 to 3x85
                 bias[:, 4] += b[0] - bias[:, 4].mean()  # obj

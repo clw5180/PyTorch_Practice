@@ -27,7 +27,7 @@ def test(cfg,
          dst_path='./output',
          weights=None,
          model=None,
-         log_file_name='log.txt'):
+         log_file_path='log.txt'):
 
     # 0、初始化一些参数
     if not os.path.exists(dst_path):
@@ -159,8 +159,8 @@ def test(cfg,
     pf_value = pf % ('all', str(image_nums), nt.sum(), mp, mr, map, mf1)
     print(pf_value)
     if __name__ != '__main__':
-        write_to_file(s, log_file_name)
-        write_to_file(pf_value, log_file_name)
+        write_to_file(s, log_file_path)
+        write_to_file(pf_value, log_file_path)
 
     results = []
     results.append( { "all" : (mp, mr, map, mf1) } )
@@ -172,7 +172,7 @@ def test(cfg,
             #print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
             print(pf % (names[c], '', nt[c], p[i], r[i], ap[i], f1[i]))
             if __name__ != '__main__':
-                write_to_file(pf % (names[c], '', nt[c], p[i], r[i], ap[i], f1[i]), log_file_name)
+                write_to_file(pf % (names[c], '', nt[c], p[i], r[i], ap[i], f1[i]), log_file_path)
             results.append( { names[c] : (p[i], r[i], ap[i], f1[i]) } )
 
     # Return results
@@ -185,14 +185,14 @@ def test(cfg,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='xxx.cfg file path')
+    parser.add_argument('--cfg', type=str, default='cfg/voc_yolov3.cfg', help='xxx.cfg file path')
     #parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='xxx.cfg file path')
-    parser.add_argument('--data', type=str, default='cfg/coco.data', help='xxx.data file path')
+    parser.add_argument('--data', type=str, default='cfg/voc.data', help='xxx.data file path')
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--device', type=str, default='0', help='device id (i.e. 0 or 0,1,2,3) ') # 默认单卡
     parser.add_argument('--src-txt-path', type=str, default='./valid.txt', help='saved img_file_paths list')
     parser.add_argument('--dst-path', type=str, default='./output', help='save detect result in this folder')
-    parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
+    parser.add_argument('--weights', type=str, default='weights/last.pt', help='path to weights file')
     #parser.add_argument('--weights', type=str, default='weights/yolov3-spp.pt', help='path to weights file')
     parser.add_argument('--img-size', type=int, default=416, help='resize to this size square and detect')
     parser.add_argument('--conf-thres', type=float, default=0.05, help='object confidence threshold')
